@@ -1,0 +1,26 @@
+{
+  "name": "lacasadelshampoo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "POS de escritorio Windows — La Casa del Shampoo",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev -w @lcds/server",
+    "dev:desktop": "npm run dev -w @lcds/desktop",
+    "build": "npm run build -w @lcds/shared && npm run build -w @lcds/db && npm run build -w @lcds/server && npm run build -w @lcds/desktop",
+    "build:server": "npm run build -w @lcds/shared && npm run build -w @lcds/db && npm run build -w @lcds/server",
+    "tauri": "npm run tauri -w @lcds/desktop",
+    "tauri:build": "npm run build:server && npm run tauri -w @lcds/desktop -- build",
+    "db:migrate": "npm run migrate -w @lcds/server",
+    "db:seed": "npm run seed -w @lcds/server",
+    "db:import": "npm run import:excel -w @lcds/server",
+    "icons": "node installer/generate-icons.mjs",
+    "typecheck": "npm run typecheck -w @lcds/shared && npm run typecheck -w @lcds/db && npm run typecheck -w @lcds/server && npm run typecheck -w @lcds/desktop"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

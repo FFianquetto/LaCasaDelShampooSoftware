@@ -1,0 +1,29 @@
+{
+  "name": "@lcds/desktop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@lcds/shared": "*",
+    "@tauri-apps/api": "^2.3.0",
+    "@tauri-apps/plugin-shell": "^2.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.3.1",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.2"
+  }
+}

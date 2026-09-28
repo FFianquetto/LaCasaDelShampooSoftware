@@ -90,18 +90,6 @@ export function PosPage() {
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
         <div className="catalog-toolbar">
-          <select
-            value={category}
-            aria-label="Categoría"
-            onChange={(event) => setCategory(event.target.value)}
-          >
-            <option value="">Todas las categorías</option>
-            {PRODUCT_CATEGORIES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
           <input
             value={q}
             autoFocus
@@ -125,6 +113,18 @@ export function PosPage() {
               })}
             </div>
           )}
+          <select
+            value={category}
+            aria-label="Categoría"
+            onChange={(event) => setCategory(event.target.value)}
+          >
+            <option value="">Todas las categorías</option>
+            {PRODUCT_CATEGORIES.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

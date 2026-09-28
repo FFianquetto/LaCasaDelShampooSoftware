@@ -229,12 +229,16 @@ a {
 }
 
 .catalog-toolbar input {
-  flex: 0 1 280px;
-  width: 280px;
+  flex: 1;
+  min-width: 220px;
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 10px;
   padding: 0.65rem 0.75rem;
+}
+
+.catalog-toolbar .store-buttons {
+  margin-left: 0;
 }
 
 .store-buttons {

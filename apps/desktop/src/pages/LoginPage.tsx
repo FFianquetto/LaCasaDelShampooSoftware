@@ -4,13 +4,13 @@ import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api";
 
 export function LoginPage() {
-  const { session, login } = useAuth();
-  const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const { session, login, isAdmin } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  if (session) return <Navigate to="/pos" replace />;
+  if (session) return <Navigate to={isAdmin ? "/pos" : "/ticket"} replace />;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -44,6 +44,8 @@ export function LoginPage() {
           <input
             type="password"
             value={password}
+            maxLength={8}
+            autoComplete="current-password"
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>

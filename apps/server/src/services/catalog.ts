@@ -38,16 +38,57 @@ export function listProducts(
     params.push(filters.category);
   }
   if (filters.q) {
-    clauses.push("(name LIKE ? OR brand LIKE ? OR sku LIKE ?)");
+    clauses.push("(name LIKE ? OR brand LIKE ? OR sku LIKE ? OR code LIKE ?)");
     const like = `%${filters.q}%`;
-    params.push(like, like, like);
+    params.push(like, like, like, like);
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return (
     db
-      .prepare(`SELECT * FROM products ${where} ORDER BY category, brand, name`)
+      .prepare(
+        `SELECT * FROM products ${where} ORDER BY category, brand, name LIMIT 2000`,
+      )
       .all(...params) as Record<string, unknown>[]
   ).map(mapProduct);
+}
+
+export function listCatalog(
+  db: Db,
+  filters: { storeId?: string; q?: string },
+): (Product & { disponible: number; vendido: number; price: number | null })[] {
+  const clauses: string[] = ["p.active = 1"];
+  const params: unknown[] = [filters.storeId ?? "", filters.storeId ?? ""];
+  if (filters.q) {
+    clauses.push(
+      "(p.name LIKE ? OR p.brand LIKE ? OR p.sku LIKE ? OR p.code LIKE ?)",
+    );
+    const like = `%${filters.q}%`;
+    params.push(like, like, like, like);
+  }
+  const rows = db
+    .prepare(
+      `SELECT p.*,
+              SUM(CASE WHEN l.store_id = ? AND l.status = 'Disponible' THEN 1 ELSE 0 END) AS disponible,
+              SUM(CASE WHEN l.store_id = ? AND l.status = 'Vendido' THEN 1 ELSE 0 END) AS vendido,
+              (SELECT pl.price FROM price_list pl
+               WHERE pl.product_id = p.id
+                 AND pl.customer_category = 'Publico'
+                 AND pl.sale_type = 'Menudeo') AS price
+       FROM products p
+       LEFT JOIN lots l ON l.product_id = p.id
+       WHERE ${clauses.join(" AND ")}
+       GROUP BY p.id
+       ORDER BY p.code
+       LIMIT 2000`,
+    )
+    .all(...params) as Record<string, unknown>[];
+
+  return rows.map((row) => ({
+    ...mapProduct(row),
+    disponible: Number(row.disponible ?? 0),
+    vendido: Number(row.vendido ?? 0),
+    price: row.price == null ? null : Number(row.price),
+  }));
 }
 
 export function listProductCategories(db: Db): { category: string; count: number }[] {
@@ -210,24 +251,43 @@ export function getLotByBarcode(db: Db, barcode: string): Lot & {
   };
 }
 
-export function listCustomers(db: Db): Customer[] {
-  return (
-    db.prepare("SELECT * FROM customers WHERE active = 1 ORDER BY name").all() as Record<
-      string,
-      unknown
-    >[]
-  ).map(mapCustomer);
+export function listCustomers(db: Db, storeId?: string): Customer[] {
+  const rows = storeId
+    ? (db
+        .prepare(
+          `SELECT * FROM customers
+           WHERE active = 1 AND (store_id = ? OR store_id IS NULL)
+           ORDER BY name`,
+        )
+        .all(storeId) as Record<string, unknown>[])
+    : (db
+        .prepare(
+          "SELECT * FROM customers WHERE active = 1 ORDER BY name",
+        )
+        .all() as Record<string, unknown>[]);
+  return rows.map(mapCustomer);
 }
 
 export function createCustomer(
   db: Db,
   input: CreateCustomerInput,
 ): Customer {
+  assertFound(
+    db.prepare("SELECT id FROM stores WHERE id = ?").get(input.storeId),
+    "Sucursal no encontrada",
+  );
   const id = newId("cus");
   db.prepare(
-    `INSERT INTO customers (id, name, category, phone, active, created_at)
-     VALUES (?, ?, ?, ?, 1, ?)`,
-  ).run(id, input.name, input.category, input.phone ?? null, nowIso());
+    `INSERT INTO customers (id, name, category, phone, store_id, active, created_at)
+     VALUES (?, ?, ?, ?, ?, 1, ?)`,
+  ).run(
+    id,
+    input.name,
+    input.category,
+    input.phone ?? null,
+    input.storeId,
+    nowIso(),
+  );
   return mapCustomer(
     db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Record<
       string,
@@ -344,6 +404,38 @@ export async function createUser(
   } catch {
     throw new AppError("Usuario ya existe", 409, "DUPLICATE");
   }
+  return mapUser(
+    db.prepare("SELECT * FROM users WHERE id = ?").get(id) as Record<
+      string,
+      unknown
+    >,
+  );
+}
+
+export function deactivateUser(db: Db, id: string, actorId: string): User {
+  if (id === actorId) {
+    throw new AppError("No puedes borrar tu propia cuenta", 400);
+  }
+  const row = assertFound(
+    db.prepare("SELECT * FROM users WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined,
+    "Usuario no encontrado",
+  );
+  if (Number(row.active) !== 1) {
+    throw new AppError("Ese usuario ya está dado de baja", 409);
+  }
+  if (String(row.role) === "Admin") {
+    const admins = db
+      .prepare(
+        "SELECT COUNT(*) AS c FROM users WHERE role = 'Admin' AND active = 1",
+      )
+      .get() as { c: number };
+    if (admins.c <= 1) {
+      throw new AppError("Debe quedar al menos un administrador activo", 400);
+    }
+  }
+  db.prepare("UPDATE users SET active = 0 WHERE id = ?").run(id);
   return mapUser(
     db.prepare("SELECT * FROM users WHERE id = ?").get(id) as Record<
       string,

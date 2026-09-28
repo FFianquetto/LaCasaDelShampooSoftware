@@ -1,47 +1,92 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { Customer, CustomerCategory } from "@lcds/shared";
+import type { Customer, CustomerCategory, Store } from "@lcds/shared";
 import { CUSTOMER_CATEGORY_LABELS } from "@lcds/shared";
 import { api, ApiError } from "../api";
+import { useAuth } from "../auth/AuthContext";
 
 export function CustomersPage() {
+  const { isAdmin, store } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [storeId, setStoreId] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState<CustomerCategory>("Publico");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
-    setCustomers(await api<Customer[]>("/customers"));
-  }
+  const activeStoreId = isAdmin ? storeId : store?.id ?? "";
 
   useEffect(() => {
-    void load();
-  }, []);
+    if (isAdmin) void api<Store[]>("/stores").then(setStores).catch(() => setStores([]));
+  }, [isAdmin]);
+
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (activeStoreId) params.set("storeId", activeStoreId);
+    void api<Customer[]>(`/customers?${params}`)
+      .then(setCustomers)
+      .catch(() => setCustomers([]));
+  }, [activeStoreId]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
+    if (!activeStoreId) {
+      setError("Elige la sucursal antes de dar de alta");
+      return;
+    }
     setError(null);
     try {
       await api("/customers", {
         method: "POST",
-        body: JSON.stringify({ name, category, phone: phone || undefined }),
+        body: JSON.stringify({
+          name,
+          category,
+          phone: phone || undefined,
+          storeId: activeStoreId,
+        }),
       });
       setName("");
       setPhone("");
-      await load();
+      const params = new URLSearchParams({ storeId: activeStoreId });
+      setCustomers(await api<Customer[]>(`/customers?${params}`));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error");
     }
   }
 
+  const selected = stores.find((item) => item.id === activeStoreId);
+  const storeLabel = isAdmin
+    ? selected?.name.replace("La Casa del Shampoo — ", "") ?? "todas las sucursales"
+    : store?.name.replace("La Casa del Shampoo — ", "") ?? "tu sucursal";
+
   return (
     <div>
       <h1 className="page-title">Clientes</h1>
       <p className="page-sub">
-        Categorías de cliente (contrato + Excel): Local (Público), Distribuidor
-        Local, Distribuidor Foráneo y Reparto.
+        {isAdmin
+          ? `Vista general. Elige una sucursal para ver solo sus clientes. Ahora: ${storeLabel}.`
+          : `Clientes de ${storeLabel}.`}
       </p>
       {error && <div className="error">{error}</div>}
+      {isAdmin && (
+        <div className="panel" style={{ marginBottom: "1rem" }}>
+          <div className="store-buttons" style={{ marginLeft: 0 }}>
+            {stores.map((item) => {
+              const active = item.id === storeId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={active ? "btn" : "btn secondary"}
+                  onClick={() => setStoreId(active ? "" : item.id)}
+                >
+                  {item.name.replace("La Casa del Shampoo — ", "")}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="panel" style={{ marginBottom: "1rem" }}>
         <form className="form-inline" onSubmit={onCreate}>
           <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
@@ -67,7 +112,7 @@ export function CustomersPage() {
             <label>Teléfono</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} />
           </div>
-          <button className="btn" type="submit">
+          <button className="btn" type="submit" disabled={!activeStoreId}>
             Alta
           </button>
         </form>
@@ -79,6 +124,7 @@ export function CustomersPage() {
               <th>Nombre</th>
               <th>Categoría</th>
               <th>Teléfono</th>
+              {isAdmin && <th>Sucursal</th>}
             </tr>
           </thead>
           <tbody>
@@ -87,6 +133,11 @@ export function CustomersPage() {
                 <td>{c.name}</td>
                 <td>{CUSTOMER_CATEGORY_LABELS[c.category]}</td>
                 <td>{c.phone ?? "—"}</td>
+                {isAdmin && (
+                  <td>
+                    {stores.find((item) => item.id === c.storeId)?.code ?? "Todas"}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

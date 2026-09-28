@@ -15,6 +15,7 @@ import { getDb } from "../db.js";
 import { login, logout } from "../services/auth.js";
 import {
   listProducts,
+  listCatalog,
   listProductCategories,
   createProduct,
   updateProduct,
@@ -27,6 +28,7 @@ import {
   upsertPrice,
   listUsers,
   createUser,
+  deactivateUser,
   listStores,
   listPromotions,
   createPromotion,
@@ -102,6 +104,18 @@ apiRouter.get("/products/categories", requireAuth, (_req, res) => {
   res.json(listProductCategories(getDb()));
 });
 
+apiRouter.get("/catalog", requireAuth, (req: AuthedRequest, res) => {
+  const requested = req.query.storeId as string | undefined;
+  const storeId =
+    req.user?.role === UserRole.Empleado ? req.user.storeId : requested;
+  res.json(
+    listCatalog(getDb(), {
+      storeId,
+      q: req.query.q as string | undefined,
+    }),
+  );
+});
+
 apiRouter.post(
   "/products",
   requireAuth,
@@ -134,8 +148,9 @@ apiRouter.patch(
 
 apiRouter.get("/lots", requireAuth, (req: AuthedRequest, res) => {
   const storeId =
-    (req.query.storeId as string | undefined) ||
-    (req.user?.role === UserRole.Empleado ? req.user.storeId : undefined);
+    req.user?.role === UserRole.Empleado
+      ? req.user.storeId
+      : (req.query.storeId as string | undefined);
   res.json(
     listLots(getDb(), {
       storeId,
@@ -167,22 +182,31 @@ apiRouter.post(
   },
 );
 
-apiRouter.get("/customers", requireAuth, (_req, res) => {
-  res.json(listCustomers(getDb()));
+apiRouter.get("/customers", requireAuth, (req: AuthedRequest, res) => {
+  const requested = req.query.storeId as string | undefined;
+  const storeId =
+    req.user?.role === UserRole.Empleado ? req.user.storeId : requested || undefined;
+  res.json(listCustomers(getDb(), storeId));
 });
 
-apiRouter.post("/customers", requireAuth, (req, res, next) => {
+apiRouter.post("/customers", requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const body = createCustomerSchema.parse(req.body);
+    if (req.user?.role === UserRole.Empleado) body.storeId = req.user.storeId;
     res.status(201).json(createCustomer(getDb(), body));
   } catch (err) {
     next(err);
   }
 });
 
-apiRouter.get("/prices", requireAuth, (req, res) => {
-  res.json(listPrices(getDb(), req.query.productId as string | undefined));
-});
+apiRouter.get(
+  "/prices",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res) => {
+    res.json(listPrices(getDb(), req.query.productId as string | undefined));
+  },
+);
 
 apiRouter.put(
   "/prices",
@@ -215,6 +239,20 @@ apiRouter.post(
     try {
       const body = createUserSchema.parse(req.body);
       res.status(201).json(await createUser(getDb(), body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.delete(
+  "/users/:id",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req: AuthedRequest, res, next) => {
+    try {
+      if (!req.user) throw new AppError("No autenticado", 401);
+      res.json(deactivateUser(getDb(), param(req.params.id), req.user.id));
     } catch (err) {
       next(err);
     }
@@ -256,6 +294,10 @@ apiRouter.patch(
 apiRouter.post("/sales/preview", requireAuth, (req, res, next) => {
   try {
     const body = commitSaleSchema.omit({ printTicket: true }).parse(req.body);
+    const session = req as AuthedRequest;
+    if (session.user?.role === UserRole.Empleado) {
+      body.storeId = session.user.storeId;
+    }
     res.json(previewSale(getDb(), body));
   } catch (err) {
     next(err);

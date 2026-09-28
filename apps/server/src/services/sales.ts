@@ -159,10 +159,15 @@ export async function commitSale(
   input: CommitSaleInput,
 ): Promise<{ sale: Sale; items: SaleItem[]; ticketText: string }> {
   if (input.customerId) {
-    assertFound(
-      db.prepare("SELECT id FROM customers WHERE id = ?").get(input.customerId),
+    const customer = assertFound(
+      db
+        .prepare("SELECT id, store_id FROM customers WHERE id = ?")
+        .get(input.customerId) as { id: string; store_id: string | null } | undefined,
       "Cliente no encontrado",
     );
+    if (customer.store_id && customer.store_id !== input.storeId) {
+      throw new AppError("Ese cliente no pertenece a esta sucursal", 400);
+    }
   }
 
   const preview = previewSale(db, input);

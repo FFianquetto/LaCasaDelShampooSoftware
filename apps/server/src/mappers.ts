@@ -44,6 +44,7 @@ export function mapProduct(row: Record<string, unknown>): Product {
     name: String(row.name),
     brand: row.brand == null ? null : String(row.brand),
     category: row.category == null ? null : String(row.category),
+    code: row.code == null ? null : String(row.code),
     cost: row.cost == null ? null : Number(row.cost),
     description: row.description == null ? null : String(row.description),
     active: intToBool(row.active as number),
@@ -69,6 +70,7 @@ export function mapCustomer(row: Record<string, unknown>): Customer {
     name: String(row.name),
     category: row.category as CustomerCategory,
     phone: row.phone == null ? null : String(row.phone),
+    storeId: row.store_id == null ? null : String(row.store_id),
     active: intToBool(row.active as number),
     createdAt: String(row.created_at),
   };

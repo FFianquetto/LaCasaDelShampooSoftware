@@ -18,8 +18,8 @@ export function openDatabase(dbPath: string): Db {
   return db;
 }
 
-function productHasColumn(db: Db, column: string): boolean {
-  const cols = db.prepare("PRAGMA table_info(products)").all() as {
+function tableHasColumn(db: Db, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as {
     name: string;
   }[];
   return cols.some((c) => c.name === column);
@@ -47,13 +47,26 @@ export function migrate(db: Db): void {
       if (applied.has(migration.id)) continue;
 
       // BD nueva ya con schema actualizado: saltar migraciones de columnas
-      if (migration.id === 2 && productHasColumn(db, "brand")) {
+      if (migration.id === 2 && tableHasColumn(db, "products", "brand")) {
         db.prepare(
           "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
         ).run(migration.id, migration.name);
         continue;
       }
-      if (migration.id === 3 && productHasColumn(db, "category")) {
+      if (migration.id === 3 && tableHasColumn(db, "products", "category")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+      if (migration.id === 4 && tableHasColumn(db, "products", "code")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
+      if (migration.id === 5 && tableHasColumn(db, "customers", "store_id")) {
         db.prepare(
           "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
         ).run(migration.id, migration.name);
@@ -68,6 +81,32 @@ export function migrate(db: Db): void {
   });
 
   run();
+  assignProductCodes(db);
+}
+
+function assignProductCodes(db: Db): void {
+  if (!tableHasColumn(db, "products", "code")) return;
+  const missing = (
+    db
+      .prepare(
+        "SELECT COUNT(*) AS c FROM products WHERE code IS NULL OR code = ''",
+      )
+      .get() as { c: number }
+  ).c;
+  if (missing === 0) return;
+
+  const rows = db
+    .prepare(
+      "SELECT id FROM products ORDER BY brand COLLATE NOCASE, name COLLATE NOCASE",
+    )
+    .all() as { id: string }[];
+  const update = db.prepare("UPDATE products SET code = ? WHERE id = ?");
+  const tx = db.transaction(() => {
+    rows.forEach((row, index) => {
+      update.run(`P${String(index + 1).padStart(4, "0")}`, row.id);
+    });
+  });
+  tx();
 }
 
 export function getMeta(db: Db, key: string): string | null {

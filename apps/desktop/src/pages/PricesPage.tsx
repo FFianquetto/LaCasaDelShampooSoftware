@@ -1,4 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import type {
   CustomerCategory,
   PriceListItem,
@@ -7,30 +8,66 @@ import type {
 } from "@lcds/shared";
 import { CUSTOMER_CATEGORY_LABELS } from "@lcds/shared";
 import { api, ApiError } from "../api";
+import { PromotionsPage } from "./PromotionsPage";
 
 export function PricesPage() {
+  const [params] = useSearchParams();
+  const requestedId = params.get("producto") ?? "";
   const [products, setProducts] = useState<Product[]>([]);
   const [prices, setPrices] = useState<PriceListItem[]>([]);
-  const [productId, setProductId] = useState("");
+  const [productId, setProductId] = useState(requestedId);
   const [category, setCategory] = useState<CustomerCategory>("Publico");
   const [saleType, setSaleType] = useState<SaleType>("Menudeo");
   const [price, setPrice] = useState("0");
   const [error, setError] = useState<string | null>(null);
+  const promosRef = useRef<HTMLDivElement>(null);
+  const [promosVisible, setPromosVisible] = useState(false);
 
-  async function load() {
-    const [p, pr] = await Promise.all([
-      api<Product[]>("/products"),
-      api<PriceListItem[]>("/prices"),
-    ]);
+  async function loadProducts() {
+    const p = await api<Product[]>("/products?active=1");
     setProducts(p);
-    setPrices(pr);
-    if (!productId && p[0]) setProductId(p[0].id);
+    setProductId((current) => {
+      if (requestedId && p.some((item) => item.id === requestedId)) return requestedId;
+      return current || p[0]?.id || "";
+    });
+  }
+
+  async function loadPrices(id: string) {
+    if (!id) {
+      setPrices([]);
+      return;
+    }
+    setPrices(await api<PriceListItem[]>(`/prices?productId=${id}`));
   }
 
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadProducts();
   }, []);
+
+  useEffect(() => {
+    const node = promosRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setPromosVisible(entry.isIntersecting),
+      { threshold: 0.2 },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    void loadPrices(productId);
+  }, [productId]);
+
+  useEffect(() => {
+    const match = prices.find(
+      (item) =>
+        item.productId === productId &&
+        item.customerCategory === category &&
+        item.saleType === saleType,
+    );
+    if (match) setPrice(String(match.price));
+  }, [prices, productId, category, saleType]);
 
   async function onSave(e: FormEvent) {
     e.preventDefault();
@@ -45,7 +82,7 @@ export function PricesPage() {
           price: Number(price),
         }),
       });
-      await load();
+      await loadPrices(productId);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error");
     }
@@ -56,10 +93,14 @@ export function PricesPage() {
 
   return (
     <div>
-      <h1 className="page-title">Precios</h1>
+      <h1 className="page-title">Precios y promociones</h1>
       <p className="page-sub">
-        Matriz categoría de cliente × menudeo/mayoreo (solo admin).
+        Precio por categoría de cliente y tipo de venta. Solo administrador.
       </p>
+      <div className="notice">
+        En Inventario, al hacer clic en un producto puedes modificar este precio
+        o quitarlo del catálogo.
+      </div>
       {error && <div className="error">{error}</div>}
       <div className="panel" style={{ marginBottom: "1rem" }}>
         <form className="form-inline" onSubmit={onSave}>
@@ -71,7 +112,7 @@ export function PricesPage() {
             >
               {products.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.sku} — {p.name}
+                  {p.code ?? p.sku} — {p.name}
                 </option>
               ))}
             </select>
@@ -139,6 +180,21 @@ export function PricesPage() {
           </tbody>
         </table>
       </div>
+      <div id="promociones" ref={promosRef}>
+        <PromotionsPage embedded />
+      </div>
+      {!promosVisible && (
+        <button
+          className="jump-down"
+          type="button"
+          aria-label="Bajar a promociones"
+          onClick={() =>
+            promosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+          }
+        >
+          ↓ Promociones
+        </button>
+      )}
     </div>
   );
 }

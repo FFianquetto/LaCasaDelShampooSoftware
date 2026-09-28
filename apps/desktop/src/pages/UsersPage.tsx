@@ -1,8 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { Store, User, UserRole } from "@lcds/shared";
 import { api, ApiError } from "../api";
+import { useAuth } from "../auth/AuthContext";
 
 export function UsersPage() {
+  const { user: me } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [username, setUsername] = useState("");
@@ -50,13 +52,29 @@ export function UsersPage() {
     }
   }
 
+  async function onDelete(id: string, usernameLabel: string) {
+    if (!window.confirm(`¿Dar de baja a ${usernameLabel}? No se puede editar; para volver a usarlo hay que crear otro.`)) {
+      return;
+    }
+    setError(null);
+    try {
+      await api(`/users/${id}`, { method: "DELETE" });
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "No se pudo borrar");
+    }
+  }
+
   const storeCode = (id: string) =>
     stores.find((s) => s.id === id)?.code ?? id;
 
   return (
     <div>
       <h1 className="page-title">Empleados</h1>
-      <p className="page-sub">Altas de Admin / Empleado por sucursal.</p>
+      <p className="page-sub">
+        Puedes crear usuarios y darlos de baja. El nombre y la contraseña no se
+        editan: si cambian, se crea una cuenta nueva.
+      </p>
       {error && <div className="error">{error}</div>}
       <div className="panel" style={{ marginBottom: "1rem" }}>
         <form className="form-inline" onSubmit={onCreate}>
@@ -73,7 +91,11 @@ export function UsersPage() {
             <input
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              minLength={8}
+              maxLength={8}
+              pattern="(?=.*\d)(?=.*[^A-Za-z0-9]).{8}"
+              title="Exactamente 8 caracteres, con al menos un número y un carácter especial"
+              onChange={(e) => setPassword(e.target.value.slice(0, 8))}
               required
             />
           </div>
@@ -122,6 +144,7 @@ export function UsersPage() {
               <th>Rol</th>
               <th>Sucursal</th>
               <th>Activo</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -132,6 +155,17 @@ export function UsersPage() {
                 <td>{u.role}</td>
                 <td>{storeCode(u.storeId)}</td>
                 <td>{u.active ? "Sí" : "No"}</td>
+                <td>
+                  {u.active && u.id !== me?.id ? (
+                    <button
+                      className="btn danger"
+                      type="button"
+                      onClick={() => void onDelete(u.id, u.username)}
+                    >
+                      Borrar
+                    </button>
+                  ) : null}
+                </td>
               </tr>
             ))}
           </tbody>

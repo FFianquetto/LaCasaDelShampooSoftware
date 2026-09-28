@@ -33,6 +33,7 @@ export const productSchema = z.object({
   name: z.string(),
   brand: z.string().nullable(),
   category: z.string().nullable(),
+  code: z.string().nullable(),
   cost: z.number().nullable(),
   description: z.string().nullable(),
   active: z.boolean(),
@@ -56,6 +57,7 @@ export const customerSchema = z.object({
   name: z.string(),
   category: customerCategorySchema,
   phone: z.string().nullable(),
+  storeId: z.string().nullable(),
   active: z.boolean(),
   createdAt: z.string(),
 });
@@ -115,6 +117,13 @@ export const saleSchema = z.object({
 });
 export type Sale = z.infer<typeof saleSchema>;
 
+/** Exactamente 8 caracteres, al menos un número y un carácter especial. */
+export const passwordSchema = z
+  .string()
+  .length(8, "La contraseña debe llenar exactamente 8 caracteres")
+  .regex(/\d/, "Debe incluir al menos un número")
+  .regex(/[^A-Za-z0-9]/, "Debe incluir al menos un carácter especial");
+
 export const loginRequestSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
@@ -149,6 +158,7 @@ export const createCustomerSchema = z.object({
   name: z.string().min(1),
   category: customerCategorySchema,
   phone: z.string().optional(),
+  storeId: z.string().min(1),
 });
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
@@ -162,7 +172,7 @@ export type UpsertPriceInput = z.infer<typeof upsertPriceSchema>;
 
 export const createUserSchema = z.object({
   username: z.string().min(3),
-  password: z.string().min(4),
+  password: passwordSchema,
   fullName: z.string().min(1),
   role: userRoleSchema,
   storeId: z.string().min(1),

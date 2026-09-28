@@ -25,7 +25,7 @@ try {
   @"
 @echo off
 set LCDS_HOST=127.0.0.1
-set LCDS_PORT=47831
+set LCDS_PORT=5100
 node `"%~dp0..\..\server\dist\index.js`"
 "@ | Set-Content -Path (Join-Path $OutDir "lcds-server.cmd") -Encoding ASCII
 }

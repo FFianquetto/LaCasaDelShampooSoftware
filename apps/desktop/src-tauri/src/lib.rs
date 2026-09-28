@@ -28,7 +28,7 @@ fn spawn_sidecar(app: &tauri::AppHandle) -> Result<(), String> {
         })?;
 
     let child = Command::new(bin)
-        .env("LCDS_PORT", "47831")
+        .env("LCDS_PORT", "5100")
         .env("LCDS_HOST", "127.0.0.1")
         .stdout(Stdio::null())
         .stderr(Stdio::null())

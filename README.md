@@ -8,7 +8,7 @@ Software de escritorio Windows (instalable) para inventario por lotes, punto de 
 |------|------------|
 | Shell | Tauri 2 |
 | UI | React + TypeScript + Vite |
-| API local | Node.js (Express) en `127.0.0.1:47831` |
+| API local | Node.js (Express) en `127.0.0.1:5100` |
 | BD | SQLite (`%APPDATA%/LaCasaDelShampoo/`) |
 
 ## Requisitos
@@ -47,16 +47,16 @@ Terminal 2 — UI:
 npm run dev:desktop
 ```
 
-Abrir http://localhost:1420
+Abrir http://127.0.0.1:5000
 
 ### Credenciales
 
 | Usuario | Contraseña | Rol / tienda |
 |---------|------------|--------------|
-| `admin` | `admin123` | Administrador (Americas) |
-| `empame` | `emp123` | Empleado Americas |
-| `emphen` | `emp123` | Empleado Henequen |
-| `empchi` | `emp123` | Empleado Chihuahua |
+| `admin` | `Admin#12` | Administrador (catálogo, precios, empleados, stock, categorías) |
+| `usuario` | `Venta#01` | Empleado Americas (POS, escaneo, ticket, inventario de su sucursal) |
+
+La contraseña es de exactamente 8 caracteres, con al menos un número y un carácter especial.
 
 ### Consultar la BD SQLite
 

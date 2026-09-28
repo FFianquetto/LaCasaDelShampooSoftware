@@ -13,15 +13,15 @@ export default defineConfig({
   },
   clearScreen: false,
   server: {
-    port: 1420,
+    port: 5000,
     strictPort: true,
-    host: host || false,
+    host: host || "127.0.0.1",
     hmr: host
-      ? { protocol: "ws", host, port: 1421 }
+      ? { protocol: "ws", host, port: 5001 }
       : undefined,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:47831",
+        target: "http://127.0.0.1:5100",
         changeOrigin: true,
       },
     },

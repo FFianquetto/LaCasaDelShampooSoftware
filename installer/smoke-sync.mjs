@@ -1,8 +1,8 @@
 /**
  * Prueba rápida de sync multi-tienda (catálogo + consolidación de reportes).
- * Requiere API en :47831 y LCDS_DATA_DIR apuntando a ./data
+ * Requiere API en :5100 y LCDS_DATA_DIR apuntando a ./data
  */
-const base = process.env.LCDS_API || "http://127.0.0.1:47831/api";
+const base = process.env.LCDS_API || "http://127.0.0.1:5100/api";
 
 async function json(path, options = {}) {
   const res = await fetch(`${base}${path}`, {

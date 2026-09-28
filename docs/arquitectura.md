@@ -11,7 +11,7 @@ Ver plan de implementación en el repositorio de planes Cursor.
 ## Diagrama
 
 ```
-[Lector HID] → [React UI] ↔ [Tauri] ↔ [Node API :47831] → [SQLite]
+[Lector HID] → [React UI :5000] ↔ [Tauri] ↔ [Node API :5100] → [SQLite]
                                       ↓
                                [Impresora tickets]
 ```

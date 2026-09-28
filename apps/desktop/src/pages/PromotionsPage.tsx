@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import type { Product, Promotion, PromotionType } from "@lcds/shared";
 import { api, ApiError } from "../api";
 
-export function PromotionsPage() {
+export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
   const [promos, setPromos] = useState<Promotion[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [name, setName] = useState("");
@@ -69,8 +69,14 @@ export function PromotionsPage() {
 
   return (
     <div>
-      <h1 className="page-title">Promociones</h1>
-      <p className="page-sub">% de descuento o Buy X Get Y por periodo.</p>
+      {embedded ? (
+        <h2 className="page-title" style={{ fontSize: "1.35rem", marginTop: "1.5rem" }}>
+          Promociones
+        </h2>
+      ) : (
+        <h1 className="page-title">Promociones</h1>
+      )}
+      <p className="page-sub">% de descuento o compra X lleva Y, por producto y periodo.</p>
       {error && <div className="error">{error}</div>}
       <div className="panel" style={{ marginBottom: "1rem" }}>
         <form onSubmit={onCreate}>

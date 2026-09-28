@@ -2,38 +2,41 @@ import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
 import { PosPage } from "./pages/PosPage";
-import { InventoryPage } from "./pages/InventoryPage";
-import { ProductsPage } from "./pages/ProductsPage";
+import { TicketPage } from "./pages/TicketPage";
 import { CustomersPage } from "./pages/CustomersPage";
 import { PricesPage } from "./pages/PricesPage";
 import { UsersPage } from "./pages/UsersPage";
-import { PromotionsPage } from "./pages/PromotionsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { SyncPage } from "./pages/SyncPage";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { user, store, logout, isAdmin } = useAuth();
+  const storeLabel = store?.name.replace("La Casa del Shampoo — ", "");
   return (
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
           La Casa del Shampoo
-          <small>POS · {store?.code}</small>
+          {!isAdmin && storeLabel && <small>{storeLabel}</small>}
         </div>
         <nav className="nav">
-          <NavLink to="/pos">Punto de venta</NavLink>
-          <NavLink to="/inventario">Inventario</NavLink>
-          <NavLink to="/clientes">Clientes</NavLink>
-          {isAdmin && (
+          {isAdmin ? (
             <>
-              <NavLink to="/productos">Productos</NavLink>
+              <NavLink to="/pos">Inventario</NavLink>
+              <NavLink to="/ticket">Ticket</NavLink>
+              <NavLink to="/clientes">Clientes</NavLink>
               <NavLink to="/precios">Precios</NavLink>
-              <NavLink to="/promociones">Promociones</NavLink>
               <NavLink to="/empleados">Empleados</NavLink>
               <NavLink to="/sync">Sync multi-tienda</NavLink>
+              <NavLink to="/reportes">Reportes</NavLink>
+            </>
+          ) : (
+            <>
+              <NavLink to="/ticket">Ticket</NavLink>
+              <NavLink to="/pos">Inventario</NavLink>
+              <NavLink to="/clientes">Clientes</NavLink>
             </>
           )}
-          <NavLink to="/reportes">Reportes</NavLink>
         </nav>
         <div className="sidebar-footer">
           <div>
@@ -63,8 +66,14 @@ function Private({ children }: { children: React.ReactNode }) {
 
 function AdminOnly({ children }: { children: React.ReactNode }) {
   const { isAdmin } = useAuth();
-  if (!isAdmin) return <Navigate to="/pos" replace />;
+  if (!isAdmin) return <Navigate to="/ticket" replace />;
   return <>{children}</>;
+}
+
+function HomeRedirect() {
+  const { session, isAdmin } = useAuth();
+  if (!session) return <Navigate to="/login" replace />;
+  return <Navigate to={isAdmin ? "/pos" : "/ticket"} replace />;
 }
 
 export function App() {
@@ -83,7 +92,15 @@ export function App() {
         path="/inventario"
         element={
           <Private>
-            <InventoryPage />
+            <PosPage />
+          </Private>
+        }
+      />
+      <Route
+        path="/ticket"
+        element={
+          <Private>
+            <TicketPage />
           </Private>
         }
       />
@@ -95,32 +112,14 @@ export function App() {
           </Private>
         }
       />
-      <Route
-        path="/productos"
-        element={
-          <Private>
-            <AdminOnly>
-              <ProductsPage />
-            </AdminOnly>
-          </Private>
-        }
-      />
+      <Route path="/productos" element={<Navigate to="/pos" replace />} />
+      <Route path="/promociones" element={<Navigate to="/precios" replace />} />
       <Route
         path="/precios"
         element={
           <Private>
             <AdminOnly>
               <PricesPage />
-            </AdminOnly>
-          </Private>
-        }
-      />
-      <Route
-        path="/promociones"
-        element={
-          <Private>
-            <AdminOnly>
-              <PromotionsPage />
             </AdminOnly>
           </Private>
         }
@@ -149,11 +148,13 @@ export function App() {
         path="/reportes"
         element={
           <Private>
-            <ReportsPage />
+            <AdminOnly>
+              <ReportsPage />
+            </AdminOnly>
           </Private>
         }
       />
-      <Route path="*" element={<Navigate to="/pos" replace />} />
+      <Route path="*" element={<HomeRedirect />} />
     </Routes>
   );
 }

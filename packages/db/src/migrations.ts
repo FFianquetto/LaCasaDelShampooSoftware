@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS products (
   name TEXT NOT NULL,
   brand TEXT,
   category TEXT,
+  code TEXT,
   cost REAL,
   description TEXT,
   active INTEGER NOT NULL DEFAULT 1,
@@ -228,8 +229,20 @@ ALTER TABLE products ADD COLUMN category TEXT;
 CREATE INDEX IF NOT EXISTS idx_products_category ON products(category);
 `;
 
+export const MIGRATION_004 = `
+ALTER TABLE products ADD COLUMN code TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_products_code ON products(code);
+`;
+
+export const MIGRATION_005 = `
+ALTER TABLE customers ADD COLUMN store_id TEXT REFERENCES stores(id);
+CREATE INDEX IF NOT EXISTS idx_customers_store ON customers(store_id);
+`;
+
 export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 1, name: "001_initial_schema", sql: MIGRATION_001 },
   { id: 2, name: "002_excel_categories_brand_cost", sql: MIGRATION_002 },
   { id: 3, name: "003_product_general_category", sql: MIGRATION_003 },
+  { id: 4, name: "004_product_public_code", sql: MIGRATION_004 },
+  { id: 5, name: "005_customer_store", sql: MIGRATION_005 },
 ];

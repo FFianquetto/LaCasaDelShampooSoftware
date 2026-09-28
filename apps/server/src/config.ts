@@ -10,7 +10,7 @@ function defaultDataDir(): string {
 }
 
 export const config = {
-  port: Number(process.env.LCDS_PORT || 47831),
+  port: Number(process.env.LCDS_PORT || 5100),
   host: process.env.LCDS_HOST || "127.0.0.1",
   dataDir: defaultDataDir(),
   get dbPath() {

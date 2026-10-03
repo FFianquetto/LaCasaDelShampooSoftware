@@ -5,6 +5,11 @@ $env:LCDS_DATA_DIR = "$PWD\data"
 $env:LCDS_PRINT_MODE = "simulate"
 npm run dev:server
 
+cd "C:\Users\cuale\Music\Fer_UANL\9no Semestre\0_Clientes\LaCasaDelShampoo\Software"
+npm run dev:desktop
+
+http://127.0.0.1:5000/.
+
 admin / Admin#12
 usuario / Venta#01 - Americas
 usuario1 / Venta#02 - Henequen
@@ -12,3 +17,13 @@ usuario2 / Venta#03 - Chihuahua
 
 
 
+Ver tablas:
+node --input-type=module -e "import Database from 'better-sqlite3'; const db=new Database('data/lacasadelshampoo.db'); console.table(db.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all()); db.close();" 
+
+
+Darle un numero de cliente a las distribuidoras para conocer la frecuencia de venta y en este caso saber que se compra una vez al mes
+Poder plantear una regla, por ello es necesario implementarlo en Clientes.
+
+Productos reporte de venta por producto.
+
+Al final del día poder hacer el corte de cuanto se debe tener en efectivo o cuanto por tarjeta.

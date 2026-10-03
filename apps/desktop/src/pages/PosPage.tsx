@@ -8,13 +8,14 @@ type CatalogRow = Product & {
   disponible: number;
   vendido: number;
   price: number | null;
+  tacha?: boolean;
 };
 
 export function PosPage() {
   const { store, isAdmin } = useAuth();
   const navigate = useNavigate();
   const [stores, setStores] = useState<Store[]>([]);
-  const [storeId, setStoreId] = useState(store?.id ?? "");
+  const [storeId, setStoreId] = useState(isAdmin ? "" : (store?.id ?? ""));
   const [rows, setRows] = useState<CatalogRow[]>([]);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState("");
@@ -30,16 +31,25 @@ export function PosPage() {
   async function loadCatalog(activeStore?: string) {
     const params = new URLSearchParams();
     if (activeStore) params.set("storeId", activeStore);
-    const data = await api<CatalogRow[]>(`/catalog?${params}`);
-    setRows(data);
-    setError(null);
+    return api<CatalogRow[]>(`/catalog?${params}`);
   }
 
   useEffect(() => {
+    let cancelled = false;
     const activeStore = isAdmin ? storeId : store?.id;
-    void loadCatalog(activeStore).catch((err) =>
-      setError(err instanceof ApiError ? err.message : "No se pudo cargar el catálogo"),
-    );
+    void loadCatalog(activeStore)
+      .then((data) => {
+        if (cancelled) return;
+        setRows(data);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : "No se pudo cargar el catálogo");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [isAdmin, store?.id, storeId]);
 
   const visible = useMemo(() => {
@@ -70,7 +80,7 @@ export function PosPage() {
         body: JSON.stringify({ active: false }),
       });
       setSelected(null);
-      await loadCatalog(activeStoreId);
+      setRows(await loadCatalog(activeStoreId));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo quitar el producto");
     } finally {
@@ -133,7 +143,10 @@ export function PosPage() {
           {visible.length} productos
           {storeLabel && activeStoreId
             ? ` · stock de ${storeLabel}`
-            : " · catálogo general"}
+            : " · stock total"}
+          {activeStoreId && visible.some((row) => row.tacha)
+            ? " · la ✗ es un producto que no vino en el Excel de esta sucursal"
+            : ""}
         </p>
         <table>
           <thead>
@@ -151,7 +164,12 @@ export function PosPage() {
             {visible.map((row) => (
               <tr
                 key={row.id}
-                className={isAdmin ? "row-link" : undefined}
+                className={[
+                  row.tacha ? "row-tacha" : "",
+                  isAdmin ? "row-link" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined}
                 onClick={isAdmin ? () => setSelected(row) : undefined}
               >
                 <td>{row.code ?? "—"}</td>
@@ -159,8 +177,8 @@ export function PosPage() {
                 <td>{row.brand ?? "—"}</td>
                 <td>{row.category ?? "—"}</td>
                 <td>{row.price == null ? "—" : `$${row.price.toFixed(2)}`}</td>
-                <td>{activeStoreId ? row.disponible : "—"}</td>
-                <td>{activeStoreId ? row.vendido : "—"}</td>
+                <td>{row.tacha ? "✗" : row.disponible}</td>
+                <td>{row.vendido}</td>
               </tr>
             ))}
           </tbody>

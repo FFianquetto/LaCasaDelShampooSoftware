@@ -73,6 +73,16 @@ export function migrate(db: Db): void {
         continue;
       }
 
+      if (
+        migration.id === 6 &&
+        tableHasColumn(db, "inventory_marks", "product_id")
+      ) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
       db.exec(migration.sql);
       db.prepare(
         "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",

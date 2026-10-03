@@ -52,12 +52,36 @@ export function listProducts(
   ).map(mapProduct);
 }
 
+export type CatalogItem = Product & {
+  disponible: number;
+  vendido: number;
+  price: number | null;
+  tacha?: boolean;
+};
+
 export function listCatalog(
   db: Db,
   filters: { storeId?: string; q?: string },
-): (Product & { disponible: number; vendido: number; price: number | null })[] {
+): CatalogItem[] {
+  const storeId = filters.storeId ?? "";
   const clauses: string[] = ["p.active = 1"];
-  const params: unknown[] = [filters.storeId ?? "", filters.storeId ?? ""];
+  const params: unknown[] = [];
+  const lotWhere = storeId ? "WHERE store_id = ?" : "";
+  if (storeId) params.push(storeId);
+
+  const markColumn = db
+    .prepare("PRAGMA table_info(inventory_marks)")
+    .all() as { name: string }[];
+  const canMark =
+    Boolean(storeId) && markColumn.some((column) => column.name === "product_id");
+  const markJoin = canMark
+    ? "LEFT JOIN inventory_marks m ON m.product_id = p.id AND m.store_id = ?"
+    : "";
+  const tachaSql = canMark
+    ? "CASE WHEN m.product_id IS NOT NULL THEN 1 ELSE 0 END"
+    : "0";
+  if (canMark) params.push(storeId);
+
   if (filters.q) {
     clauses.push(
       "(p.name LIKE ? OR p.brand LIKE ? OR p.sku LIKE ? OR p.code LIKE ?)",
@@ -65,21 +89,30 @@ export function listCatalog(
     const like = `%${filters.q}%`;
     params.push(like, like, like, like);
   }
+
   const rows = db
     .prepare(
       `SELECT p.*,
-              SUM(CASE WHEN l.store_id = ? AND l.status = 'Disponible' THEN 1 ELSE 0 END) AS disponible,
-              SUM(CASE WHEN l.store_id = ? AND l.status = 'Vendido' THEN 1 ELSE 0 END) AS vendido,
-              (SELECT pl.price FROM price_list pl
-               WHERE pl.product_id = p.id
-                 AND pl.customer_category = 'Publico'
-                 AND pl.sale_type = 'Menudeo') AS price
+              IFNULL(stock.disponible, 0) AS disponible,
+              IFNULL(stock.vendido, 0) AS vendido,
+              pl.price AS price,
+              ${tachaSql} AS tacha
        FROM products p
-       LEFT JOIN lots l ON l.product_id = p.id
+       LEFT JOIN (
+         SELECT product_id,
+                SUM(CASE WHEN status = 'Disponible' THEN 1 ELSE 0 END) AS disponible,
+                SUM(CASE WHEN status = 'Vendido' THEN 1 ELSE 0 END) AS vendido
+         FROM lots
+         ${lotWhere}
+         GROUP BY product_id
+       ) stock ON stock.product_id = p.id
+       LEFT JOIN price_list pl
+         ON pl.product_id = p.id
+        AND pl.customer_category = 'Publico'
+        AND pl.sale_type = 'Menudeo'
+       ${markJoin}
        WHERE ${clauses.join(" AND ")}
-       GROUP BY p.id
-       ORDER BY p.code
-       LIMIT 2000`,
+       ORDER BY p.code`,
     )
     .all(...params) as Record<string, unknown>[];
 
@@ -88,6 +121,7 @@ export function listCatalog(
     disponible: Number(row.disponible ?? 0),
     vendido: Number(row.vendido ?? 0),
     price: row.price == null ? null : Number(row.price),
+    tacha: Number(row.tacha) === 1,
   }));
 }
 

@@ -239,10 +239,27 @@ ALTER TABLE customers ADD COLUMN store_id TEXT REFERENCES stores(id);
 CREATE INDEX IF NOT EXISTS idx_customers_store ON customers(store_id);
 `;
 
+export const MIGRATION_006 = `
+CREATE TABLE IF NOT EXISTS inventory_marks (
+  id TEXT PRIMARY KEY NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  product_id TEXT NOT NULL REFERENCES products(id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_marks_store_product
+  ON inventory_marks(store_id, product_id);
+`;
+
+export const MIGRATION_007 = `
+CREATE INDEX IF NOT EXISTS idx_lots_product_store_status
+  ON lots(product_id, store_id, status);
+`;
+
 export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 1, name: "001_initial_schema", sql: MIGRATION_001 },
   { id: 2, name: "002_excel_categories_brand_cost", sql: MIGRATION_002 },
   { id: 3, name: "003_product_general_category", sql: MIGRATION_003 },
   { id: 4, name: "004_product_public_code", sql: MIGRATION_004 },
   { id: 5, name: "005_customer_store", sql: MIGRATION_005 },
+  { id: 6, name: "006_inventory_marks", sql: MIGRATION_006 },
+  { id: 7, name: "007_lot_stock_index", sql: MIGRATION_007 },
 ];

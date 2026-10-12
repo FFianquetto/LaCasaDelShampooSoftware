@@ -1,15 +1,29 @@
 import express from "express";
 import cors from "cors";
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { config } from "./config.js";
 import { getDb, closeDb } from "./db.js";
 import { apiRouter } from "./routes/api.js";
 import { errorHandler } from "./middleware.js";
 
+function installBundledDatabase(): void {
+  if (fs.existsSync(config.dbPath)) return;
+  const bundled = path.join(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "catalog.db",
+  );
+  if (!fs.existsSync(bundled)) return;
+  fs.mkdirSync(config.dataDir, { recursive: true });
+  fs.copyFileSync(bundled, config.dbPath);
+}
+
 export function createApp() {
   fs.mkdirSync(config.dataDir, { recursive: true });
   fs.mkdirSync(config.exportsDir, { recursive: true });
   fs.mkdirSync(config.backupsDir, { recursive: true });
+  installBundledDatabase();
   getDb();
 
   const app = express();

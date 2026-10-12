@@ -1,6 +1,6 @@
 {
-  "permissions": [
-    "core:default",
-    "shell:allow-open"
-  ]
+  "identifier": "default",
+  "description": "Permisos locales de la ventana del punto de venta",
+  "windows": ["main"],
+  "permissions": ["core:default", "shell:allow-open"]
 }

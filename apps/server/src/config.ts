@@ -33,16 +33,21 @@ export const config = {
     | "system",
 };
 
-function envFilePath(): string {
+function envFileCandidates(): string[] {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(here, "../../..", ".env");
+  return [
+    path.join(defaultDataDir(), ".env"),
+    path.resolve(here, "../../..", ".env"),
+  ];
 }
 
 function readEnvFile(): Record<string, string> {
   const values: Record<string, string> = {};
+  const envPath = envFileCandidates().find((candidate) => fs.existsSync(candidate));
+  if (!envPath) return values;
   let text = "";
   try {
-    text = fs.readFileSync(envFilePath(), "utf8");
+    text = fs.readFileSync(envPath, "utf8");
   } catch {
     return values;
   }

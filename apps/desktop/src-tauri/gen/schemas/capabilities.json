@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Permisos locales de la ventana del punto de venta","local":true,"windows":["main"],"permissions":["core:default","shell:allow-open"]}}

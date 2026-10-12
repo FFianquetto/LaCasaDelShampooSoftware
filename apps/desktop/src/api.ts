@@ -1,6 +1,8 @@
 import type { Session } from "@lcds/shared";
 
-const API_BASE = import.meta.env.VITE_API_URL || "/api";
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.TAURI_ENV_PLATFORM ? "http://127.0.0.1:5100/api" : "/api");
 
 export class ApiError extends Error {
   constructor(

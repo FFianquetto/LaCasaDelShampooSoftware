@@ -22,6 +22,7 @@ export const userSchema = z.object({
   role: userRoleSchema,
   username: z.string(),
   fullName: z.string(),
+  phone: z.string().nullable(),
   active: z.boolean(),
   createdAt: z.string(),
 });
@@ -34,6 +35,7 @@ export const productSchema = z.object({
   brand: z.string().nullable(),
   category: z.string().nullable(),
   code: z.string().nullable(),
+  barcode: z.string().nullable(),
   cost: z.number().nullable(),
   description: z.string().nullable(),
   active: z.boolean(),
@@ -52,14 +54,27 @@ export const lotSchema = z.object({
 });
 export type Lot = z.infer<typeof lotSchema>;
 
+export const customerFrequencySchema = z.object({
+  salesCount: z.number().int().nonnegative(),
+  lastPurchaseAt: z.string().nullable(),
+  avgDaysBetween: z.number().nullable(),
+  daysSinceAnchor: z.number().nullable(),
+  status: z.enum(["al_dia", "atrasado", "sin_regla"]),
+});
+export type CustomerFrequency = z.infer<typeof customerFrequencySchema>;
+
 export const customerSchema = z.object({
   id: z.string(),
   name: z.string(),
   category: customerCategorySchema,
   phone: z.string().nullable(),
+  email: z.string().nullable(),
   storeId: z.string().nullable(),
+  clientNumber: z.string().nullable(),
+  purchaseEveryDays: z.number().int().positive().nullable(),
   active: z.boolean(),
   createdAt: z.string(),
+  frequency: customerFrequencySchema.nullable(),
 });
 export type Customer = z.infer<typeof customerSchema>;
 
@@ -154,13 +169,32 @@ export const createLotSchema = z.object({
 });
 export type CreateLotInput = z.infer<typeof createLotSchema>;
 
+const clientNumberSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(20)
+  .regex(
+    /^[A-Za-z0-9-]+$/,
+    "El número solo puede tener letras, números y guiones",
+  );
+
 export const createCustomerSchema = z.object({
   name: z.string().min(1),
   category: customerCategorySchema,
-  phone: z.string().optional(),
+  phone: z.string().trim().optional(),
+  email: z.string().trim().optional(),
   storeId: z.string().min(1),
+  clientNumber: clientNumberSchema.optional(),
+  purchaseEveryDays: z.number().int().min(1).max(365).optional(),
 });
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
+
+export const updateCustomerRuleSchema = z.object({
+  clientNumber: clientNumberSchema,
+  purchaseEveryDays: z.number().int().min(1).max(365),
+});
+export type UpdateCustomerRuleInput = z.infer<typeof updateCustomerRuleSchema>;
 
 export const upsertPriceSchema = z.object({
   productId: z.string().min(1),
@@ -174,6 +208,7 @@ export const createUserSchema = z.object({
   username: z.string().min(3),
   password: passwordSchema,
   fullName: z.string().min(1),
+  phone: z.string().trim().min(1, "Escribe el teléfono"),
   role: userRoleSchema,
   storeId: z.string().min(1),
 });
@@ -202,6 +237,7 @@ export const commitSaleSchema = z.object({
   saleType: saleTypeSchema,
   paymentMethod: paymentMethodSchema.optional(),
   barcodes: z.array(z.string().min(1)).min(1),
+  email: z.string().trim().email("Escribe un correo válido"),
   printTicket: z.boolean().default(true),
 });
 export type CommitSaleInput = z.infer<typeof commitSaleSchema>;

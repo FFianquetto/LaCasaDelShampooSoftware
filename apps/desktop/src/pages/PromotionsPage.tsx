@@ -2,6 +2,18 @@ import { FormEvent, useEffect, useState } from "react";
 import type { Product, Promotion, PromotionType } from "@lcds/shared";
 import { api, ApiError } from "../api";
 
+function localDateInput(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function localDayBound(value: string, end: boolean): string {
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day, end ? 23 : 0, end ? 59 : 0, end ? 59 : 0, end ? 999 : 0);
+  return date.toISOString();
+}
+
 export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
   const [promos, setPromos] = useState<Promotion[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -11,13 +23,11 @@ export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
   const [buyQty, setBuyQty] = useState("2");
   const [getQty, setGetQty] = useState("1");
   const [productId, setProductId] = useState("");
-  const [startsAt, setStartsAt] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [startsAt, setStartsAt] = useState(() => localDateInput(new Date()));
   const [endsAt, setEndsAt] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 30);
-    return d.toISOString().slice(0, 10);
+    return localDateInput(d);
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -43,8 +53,8 @@ export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
         body: JSON.stringify({
           name,
           type,
-          startsAt: new Date(startsAt).toISOString(),
-          endsAt: new Date(endsAt + "T23:59:59").toISOString(),
+          startsAt: localDayBound(startsAt, false),
+          endsAt: localDayBound(endsAt, true),
           percentOff: type === "PercentOff" ? Number(percentOff) : undefined,
           buyQty: type === "BuyXGetY" ? Number(buyQty) : undefined,
           getQty: type === "BuyXGetY" ? Number(getQty) : undefined,
@@ -53,6 +63,10 @@ export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
         }),
       });
       setName("");
+      setProductId("");
+      setPercentOff("10");
+      setBuyQty("2");
+      setGetQty("1");
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error");
@@ -92,7 +106,7 @@ export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
                 onChange={(e) => setType(e.target.value as PromotionType)}
               >
                 <option value="PercentOff">% descuento</option>
-                <option value="BuyXGetY">Buy X Get Y</option>
+                <option value="BuyXGetY">Compra X lleva Y</option>
               </select>
             </div>
             {type === "PercentOff" ? (
@@ -176,11 +190,11 @@ export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
             {promos.map((p) => (
               <tr key={p.id}>
                 <td>{p.name}</td>
-                <td>{p.type}</td>
+                <td>{p.type === "PercentOff" ? "% descuento" : "Compra y lleva"}</td>
                 <td>
                   {p.type === "PercentOff"
                     ? `${p.percentOff}%`
-                    : `${p.buyQty}+${p.getQty}`}
+                    : `Compra ${p.buyQty}, gratis ${p.getQty}`}
                 </td>
                 <td>
                   {new Date(p.startsAt).toLocaleDateString()} —{" "}

@@ -247,10 +247,11 @@ export function consolidateReports(filePaths: string[]): {
   return { stores, grandTotal };
 }
 
-export function salesReport(
-  db: Db,
-  filters: { storeId?: string; from?: string; to?: string },
-) {
+function money(value: number) {
+  return Math.round(Number(value) * 100) / 100;
+}
+
+function salesFilter(filters: { storeId?: string; from?: string; to?: string }) {
   const clauses: string[] = ["s.ticket_printed = 1"];
   const params: unknown[] = [];
   if (filters.storeId) {
@@ -265,7 +266,60 @@ export function salesReport(
     clauses.push("s.created_at <= ?");
     params.push(filters.to);
   }
-  const where = `WHERE ${clauses.join(" AND ")}`;
+  return { where: `WHERE ${clauses.join(" AND ")}`, params };
+}
+
+export function productSalesReport(
+  db: Db,
+  filters: { storeId?: string; from?: string; to?: string },
+) {
+  const { where, params } = salesFilter(filters);
+  const rows = db
+    .prepare(
+      `SELECT p.id, p.code, p.name, p.brand,
+              COUNT(si.id) AS units,
+              COALESCE(SUM(si.final_price), 0) AS revenue
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       JOIN products p ON p.id = si.product_id
+       ${where}
+       GROUP BY p.id
+       ORDER BY revenue DESC, p.name COLLATE NOCASE`,
+    )
+    .all(...params) as {
+    id: string;
+    code: string | null;
+    name: string;
+    brand: string | null;
+    units: number;
+    revenue: number;
+  }[];
+
+  const products = rows.map((row) => ({
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    brand: row.brand,
+    units: row.units,
+    revenue: money(row.revenue),
+  }));
+
+  return {
+    products,
+    totals: {
+      products: products.length,
+      units: products.reduce((acc, row) => acc + row.units, 0),
+      revenue: money(products.reduce((acc, row) => acc + row.revenue, 0)),
+    },
+  };
+}
+
+export function salesReport(
+  db: Db,
+  filters: { storeId?: string; from?: string; to?: string },
+  options: { cashCut?: boolean } = {},
+) {
+  const { where, params } = salesFilter(filters);
 
   const rows = db
     .prepare(
@@ -299,7 +353,7 @@ export function salesReport(
       .get(...params) as { c: number }
   ).c;
 
-  return {
+  const report = {
     sales: rows.map((r) => ({
       ...mapSale(r),
       employeeName: String(r.employee_name),
@@ -309,7 +363,80 @@ export function salesReport(
     totals: {
       salesCount,
       lotsSold,
-      revenue: Math.round(Number(revenue) * 100) / 100,
+      revenue: money(revenue),
+    },
+  };
+
+  if (!options.cashCut) return report;
+
+  const cut = db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN s.payment_method = 'Efectivo' THEN s.total ELSE 0 END), 0) AS efectivo,
+         COALESCE(SUM(CASE WHEN s.payment_method = 'Tarjeta' THEN s.total ELSE 0 END), 0) AS tarjeta,
+         COALESCE(SUM(CASE WHEN s.payment_method = 'Transferencia' THEN s.total ELSE 0 END), 0) AS transferencia,
+         COALESCE(SUM(CASE WHEN s.payment_method IS NULL THEN s.total ELSE 0 END), 0) AS sin_metodo,
+         COALESCE(SUM(CASE WHEN s.payment_method = 'Efectivo' THEN 1 ELSE 0 END), 0) AS n_efectivo,
+         COALESCE(SUM(CASE WHEN s.payment_method = 'Tarjeta' THEN 1 ELSE 0 END), 0) AS n_tarjeta,
+         COALESCE(SUM(CASE WHEN s.payment_method = 'Transferencia' THEN 1 ELSE 0 END), 0) AS n_transferencia,
+         COALESCE(SUM(CASE WHEN s.payment_method IS NULL THEN 1 ELSE 0 END), 0) AS n_sin_metodo
+       FROM sales s
+       ${where}`,
+    )
+    .get(...params) as {
+    efectivo: number;
+    tarjeta: number;
+    transferencia: number;
+    sin_metodo: number;
+    n_efectivo: number;
+    n_tarjeta: number;
+    n_transferencia: number;
+    n_sin_metodo: number;
+  };
+
+  const byStore = (
+    db
+      .prepare(
+        `SELECT st.code AS store_code, st.name AS store_name,
+           COALESCE(SUM(CASE WHEN s.payment_method = 'Efectivo' THEN s.total ELSE 0 END), 0) AS efectivo,
+           COALESCE(SUM(CASE WHEN s.payment_method = 'Tarjeta' THEN s.total ELSE 0 END), 0) AS tarjeta,
+           COALESCE(SUM(CASE WHEN s.payment_method = 'Transferencia' THEN s.total ELSE 0 END), 0) AS transferencia
+         FROM sales s
+         JOIN stores st ON st.id = s.store_id
+         ${where}
+         GROUP BY st.id
+         HAVING COUNT(*) > 0
+         ORDER BY st.code`,
+      )
+      .all(...params) as {
+      store_code: string;
+      store_name: string;
+      efectivo: number;
+      tarjeta: number;
+      transferencia: number;
+    }[]
+  ).map((row) => ({
+    storeCode: row.store_code,
+    storeName: row.store_name,
+    efectivo: money(row.efectivo),
+    tarjeta: money(row.tarjeta),
+    transferencia: money(row.transferencia),
+  }));
+
+  return {
+    ...report,
+    cashCut: {
+      efectivo: money(cut.efectivo),
+      tarjeta: money(cut.tarjeta),
+      transferencia: money(cut.transferencia),
+      sinMetodo: money(cut.sin_metodo),
+      counts: {
+        efectivo: cut.n_efectivo,
+        tarjeta: cut.n_tarjeta,
+        transferencia: cut.n_transferencia,
+        sinMetodo: cut.n_sin_metodo,
+      },
+      byStore,
     },
   };
 }

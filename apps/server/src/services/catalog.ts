@@ -3,17 +3,23 @@ import type {
   CreateProductInput,
   CreateLotInput,
   CreateCustomerInput,
+  UpdateCustomerRuleInput,
   UpsertPriceInput,
   CreateUserInput,
   CreatePromotionInput,
   Product,
   Lot,
   Customer,
+  CustomerFrequency,
   PriceListItem,
   User,
   Promotion,
   CustomerCategory,
   SaleType,
+} from "@lcds/shared";
+import {
+  DEFAULT_PURCHASE_EVERY_DAYS,
+  isDistributorCategory,
 } from "@lcds/shared";
 import { AppError, assertFound } from "../errors.js";
 import {
@@ -46,7 +52,7 @@ export function listProducts(
   return (
     db
       .prepare(
-        `SELECT * FROM products ${where} ORDER BY category, brand, name LIMIT 2000`,
+        `SELECT * FROM products ${where} ORDER BY code, name LIMIT 2000`,
       )
       .all(...params) as Record<string, unknown>[]
   ).map(mapProduct);
@@ -136,18 +142,33 @@ export function listProductCategories(db: Db): { category: string; count: number
     .all() as { category: string; count: number }[];
 }
 
+function nextProductCode(db: Db): string {
+  const rows = db
+    .prepare("SELECT code FROM products WHERE code GLOB 'P[0-9]*'")
+    .all() as { code: string }[];
+  let max = 0;
+  for (const row of rows) {
+    const value = Number(row.code.slice(1));
+    if (Number.isInteger(value)) max = Math.max(max, value);
+  }
+  return `P${String(max + 1).padStart(4, "0")}`;
+}
+
 export function createProduct(db: Db, input: CreateProductInput): Product {
   const id = newId("prd");
+  const code = nextProductCode(db);
   try {
     db.prepare(
-      `INSERT INTO products (id, sku, name, brand, category, cost, description, active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+      `INSERT INTO products (id, sku, name, brand, category, code, barcode, cost, description, active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
     ).run(
       id,
       input.sku,
       input.name,
       input.brand ?? null,
       input.category ?? null,
+      code,
+      code,
       input.cost ?? null,
       input.description ?? null,
       nowIso(),
@@ -285,7 +306,92 @@ export function getLotByBarcode(db: Db, barcode: string): Lot & {
   };
 }
 
-export function listCustomers(db: Db, storeId?: string): Customer[] {
+function mexicoDay(value: Date | string): number {
+  const date = typeof value === "string" ? new Date(value) : value;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Mexico_City",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+  const [year, month, day] = parts.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+function daysBetween(fromIso: string, to: Date): number {
+  return Math.round((mexicoDay(to) - mexicoDay(fromIso)) / 86_400_000);
+}
+
+function nextClientNumber(db: Db): string {
+  const rows = db
+    .prepare(
+      `SELECT client_number FROM customers
+       WHERE client_number GLOB 'D-[0-9]*'`,
+    )
+    .all() as { client_number: string }[];
+  let max = 0;
+  for (const row of rows) {
+    const value = Number(row.client_number.slice(2));
+    if (Number.isInteger(value)) max = Math.max(max, value);
+  }
+  return `D-${String(max + 1).padStart(4, "0")}`;
+}
+
+function assertClientNumberFree(db: Db, clientNumber: string, exceptId?: string) {
+  const taken = db
+    .prepare(
+      `SELECT id FROM customers
+       WHERE client_number = ? AND id != ?`,
+    )
+    .get(clientNumber, exceptId ?? "") as { id: string } | undefined;
+  if (taken) throw new AppError("Ese número de cliente ya existe", 409);
+}
+
+function frequencyFor(
+  customer: Customer,
+  stats:
+    | { sales_count: number; first_purchase_at: string; last_purchase_at: string }
+    | undefined,
+  now: Date,
+): CustomerFrequency | null {
+  if (!isDistributorCategory(customer.category)) return null;
+  const salesCount = stats?.sales_count ?? 0;
+  const lastPurchaseAt = stats?.last_purchase_at ?? null;
+  const avgDaysBetween =
+    stats && salesCount >= 2
+      ? Math.round(
+          (mexicoDay(stats.last_purchase_at) - mexicoDay(stats.first_purchase_at)) /
+            86_400_000 /
+            (salesCount - 1),
+        )
+      : null;
+
+  if (customer.purchaseEveryDays == null) {
+    return {
+      salesCount,
+      lastPurchaseAt,
+      avgDaysBetween,
+      daysSinceAnchor: null,
+      status: "sin_regla",
+    };
+  }
+
+  const anchor = lastPurchaseAt ?? customer.createdAt;
+  const daysSinceAnchor = Math.max(0, daysBetween(anchor, now));
+  return {
+    salesCount,
+    lastPurchaseAt,
+    avgDaysBetween,
+    daysSinceAnchor,
+    status: daysSinceAnchor <= customer.purchaseEveryDays ? "al_dia" : "atrasado",
+  };
+}
+
+export function listCustomers(
+  db: Db,
+  storeId?: string,
+  withFrequency = false,
+): Customer[] {
   const rows = storeId
     ? (db
         .prepare(
@@ -299,7 +405,30 @@ export function listCustomers(db: Db, storeId?: string): Customer[] {
           "SELECT * FROM customers WHERE active = 1 ORDER BY name",
         )
         .all() as Record<string, unknown>[]);
-  return rows.map(mapCustomer);
+  const customers = rows.map(mapCustomer);
+  if (!withFrequency) return customers;
+
+  const stats = db
+    .prepare(
+      `SELECT customer_id, COUNT(*) AS sales_count,
+              MIN(created_at) AS first_purchase_at,
+              MAX(created_at) AS last_purchase_at
+       FROM sales
+       WHERE ticket_printed = 1 AND customer_id IS NOT NULL
+       GROUP BY customer_id`,
+    )
+    .all() as {
+    customer_id: string;
+    sales_count: number;
+    first_purchase_at: string;
+    last_purchase_at: string;
+  }[];
+  const byCustomer = new Map(stats.map((row) => [row.customer_id, row]));
+  const now = new Date();
+  return customers.map((customer) => ({
+    ...customer,
+    frequency: frequencyFor(customer, byCustomer.get(customer.id), now),
+  }));
 }
 
 export function createCustomer(
@@ -310,18 +439,72 @@ export function createCustomer(
     db.prepare("SELECT id FROM stores WHERE id = ?").get(input.storeId),
     "Sucursal no encontrada",
   );
+  const distributor = isDistributorCategory(input.category);
+  const clientNumber = distributor
+    ? (input.clientNumber?.trim() || nextClientNumber(db))
+    : null;
+  const purchaseEveryDays = distributor
+    ? (input.purchaseEveryDays ?? DEFAULT_PURCHASE_EVERY_DAYS)
+    : null;
+  if (clientNumber) assertClientNumberFree(db, clientNumber);
+
+  const phone = input.phone?.trim() || null;
+  const email = input.email?.trim() || null;
+  if (!phone && !email) {
+    throw new AppError("Escribe el teléfono o el correo. Con uno basta.", 400);
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new AppError("El correo no es válido", 400);
+  }
+
   const id = newId("cus");
   db.prepare(
-    `INSERT INTO customers (id, name, category, phone, store_id, active, created_at)
-     VALUES (?, ?, ?, ?, ?, 1, ?)`,
+    `INSERT INTO customers
+     (id, name, category, phone, email, store_id, client_number, purchase_every_days, active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
   ).run(
     id,
     input.name,
     input.category,
-    input.phone ?? null,
+    phone,
+    email,
     input.storeId,
+    clientNumber,
+    purchaseEveryDays,
     nowIso(),
   );
+  return mapCustomer(
+    db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Record<
+      string,
+      unknown
+    >,
+  );
+}
+
+export function updateCustomerRule(
+  db: Db,
+  id: string,
+  input: UpdateCustomerRuleInput,
+): Customer {
+  const current = assertFound(
+    db.prepare("SELECT * FROM customers WHERE id = ? AND active = 1").get(id) as
+      | Record<string, unknown>
+      | undefined,
+    "Cliente no encontrado",
+  );
+  const customer = mapCustomer(current);
+  if (!isDistributorCategory(customer.category)) {
+    throw new AppError(
+      "El número y la regla de compra solo aplican a distribuidoras",
+      400,
+    );
+  }
+  assertClientNumberFree(db, input.clientNumber, id);
+  db.prepare(
+    `UPDATE customers
+     SET client_number = ?, purchase_every_days = ?
+     WHERE id = ?`,
+  ).run(input.clientNumber, input.purchaseEveryDays, id);
   return mapCustomer(
     db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Record<
       string,
@@ -424,8 +607,8 @@ export async function createUser(
   const passwordHash = await hashPassword(input.password);
   try {
     db.prepare(
-      `INSERT INTO users (id, store_id, role, username, password_hash, full_name, active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+      `INSERT INTO users (id, store_id, role, username, password_hash, full_name, phone, active, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)`,
     ).run(
       id,
       input.storeId,
@@ -433,6 +616,7 @@ export async function createUser(
       input.username,
       passwordHash,
       input.fullName,
+      input.phone.trim(),
       nowIso(),
     );
   } catch {

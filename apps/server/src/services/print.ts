@@ -19,6 +19,8 @@ export type TicketData = {
   subtotal: number;
   discountTotal: number;
   total: number;
+  paymentMethod?: string | null;
+  email?: string | null;
 };
 
 export function formatTicket(data: TicketData): string {
@@ -34,7 +36,9 @@ export function formatTicket(data: TicketData): string {
     `Cajero: ${data.employee}`,
     `Tipo: ${data.saleType} / ${data.customerCategory}`,
   ];
+  if (data.paymentMethod) rows.push(`Pago: ${data.paymentMethod}`);
   if (data.customer) rows.push(`Cliente: ${data.customer}`);
+  if (data.email) rows.push(`Correo: ${data.email}`);
   rows.push(dash);
   for (const item of data.lines) {
     rows.push(item.name.slice(0, w));

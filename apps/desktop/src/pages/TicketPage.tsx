@@ -1,6 +1,5 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import type {
-  Customer,
   CustomerCategory,
   PaymentMethod,
   SaleType,
@@ -28,23 +27,43 @@ type Preview = {
 type CommitResult = {
   sale: { folio: string; total: number };
   ticketText: string;
+  emailed: boolean;
+  email: string;
+};
+
+type RecentTicket = {
+  folio: string;
+  createdAt: string;
+  total: number;
+  email: string | null;
+  emailed: boolean;
+  storeName: string;
+  ticketText: string;
 };
 
 export function TicketPage() {
   const { isAdmin, store } = useAuth();
   const [stores, setStores] = useState<Store[]>([]);
   const [storeId, setStoreId] = useState(store?.id ?? "");
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [customerId, setCustomerId] = useState("");
   const [category, setCategory] = useState<CustomerCategory>("Publico");
   const [saleType, setSaleType] = useState<SaleType>("Menudeo");
   const [payment, setPayment] = useState<PaymentMethod>("Efectivo");
   const [barcode, setBarcode] = useState("");
   const [barcodes, setBarcodes] = useState<string[]>([]);
+  const [scanSealed, setScanSealed] = useState(false);
+  const fromScanner = useRef(false);
+  const barcodeRef = useRef("");
+  const lastKeyAt = useRef(0);
+  const sealTimer = useRef<number | null>(null);
+  const [email, setEmail] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [ticket, setTicket] = useState<CommitResult | null>(null);
+  const [recent, setRecent] = useState<RecentTicket[]>([]);
+  const [openFolio, setOpenFolio] = useState<string | null>(null);
+  const openTicketRef = useRef<HTMLPreElement | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"scan" | "print" | null>(null);
+  const [busy, setBusy] = useState<"scan" | "send" | null>(null);
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const activeStoreId = isAdmin ? storeId : store?.id ?? "";
 
@@ -56,13 +75,18 @@ export function TicketPage() {
 
   useEffect(() => {
     if (!activeStoreId) {
-      setCustomers([]);
+      setRecent([]);
       return;
     }
-    void api<Customer[]>(`/customers?storeId=${activeStoreId}`)
-      .then((rows) => setCustomers(rows.filter((row) => row.active)))
-      .catch(() => setCustomers([]));
-  }, [activeStoreId]);
+    void api<RecentTicket[]>(`/sales/recent?storeId=${activeStoreId}`)
+      .then(setRecent)
+      .catch(() => setRecent([]));
+  }, [activeStoreId, ticket?.sale.folio]);
+
+  useEffect(() => {
+    if (!openFolio) return;
+    openTicketRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [openFolio]);
 
   async function quote(
     next: string[],
@@ -77,7 +101,6 @@ export function TicketPage() {
       method: "POST",
       body: JSON.stringify({
         storeId: activeStoreId,
-        customerId: customerId || null,
         customerCategory: overrides?.category ?? category,
         saleType: overrides?.saleType ?? saleType,
         paymentMethod: payment,
@@ -87,20 +110,71 @@ export function TicketPage() {
     setPreview(data);
   }
 
+  function releaseScan(clear: boolean) {
+    fromScanner.current = false;
+    if (sealTimer.current != null) window.clearTimeout(sealTimer.current);
+    sealTimer.current = null;
+    setScanSealed(false);
+    if (clear) {
+      barcodeRef.current = "";
+      setBarcode("");
+    }
+  }
+
+  function onScanKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if ((scanSealed || busy === "scan") && event.key !== "Enter") {
+      event.preventDefault();
+      return;
+    }
+    if (
+      fromScanner.current &&
+      (event.key === "Backspace" || event.key === "Delete")
+    ) {
+      event.preventDefault();
+      return;
+    }
+    const now = performance.now();
+    const gap = now - lastKeyAt.current;
+    lastKeyAt.current = now;
+    if (event.key.length === 1 && barcodeRef.current.length > 0 && gap < 40) {
+      fromScanner.current = true;
+    }
+    if (fromScanner.current && event.key !== "Enter") {
+      if (sealTimer.current != null) window.clearTimeout(sealTimer.current);
+      sealTimer.current = window.setTimeout(() => setScanSealed(true), 120);
+    }
+  }
+
+  function onScanChange(value: string) {
+    if (scanSealed || busy === "scan") return;
+    if (
+      fromScanner.current &&
+      !(value.startsWith(barcodeRef.current) && value.length >= barcodeRef.current.length)
+    ) {
+      return;
+    }
+    barcodeRef.current = value;
+    setBarcode(value);
+  }
+
   async function addBarcode(event: FormEvent) {
     event.preventDefault();
     const code = barcode.trim();
+    const scanned = fromScanner.current || scanSealed;
     if (!code || busy) return;
     setError(null);
     setTicket(null);
     const next = [...barcodes, code];
     setBusy("scan");
+    setScanSealed(true);
     try {
       await quote(next);
       setBarcodes(next);
-      setBarcode("");
+      releaseScan(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo escanear");
+      if (scanned) releaseScan(true);
+      else setScanSealed(false);
     } finally {
       setBusy(null);
     }
@@ -120,20 +194,19 @@ export function TicketPage() {
   }
 
   async function closeSale() {
-    if (!preview || barcodes.length === 0 || busy) return;
-    setBusy("print");
+    if (!preview || barcodes.length === 0 || busy || !emailOk) return;
+    setBusy("send");
     setError(null);
     try {
       const result = await api<CommitResult>("/sales/commit", {
         method: "POST",
         body: JSON.stringify({
           storeId: activeStoreId,
-          customerId: customerId || null,
           customerCategory: category,
           saleType,
           paymentMethod: payment,
           barcodes,
-          printTicket: true,
+          email: email.trim(),
         }),
       });
       setTicket(result);
@@ -143,7 +216,7 @@ export function TicketPage() {
       setError(
         err instanceof ApiError
           ? err.message
-          : "La venta no se cerró porque no se imprimió el ticket",
+          : "La venta no se cerró porque no se envió el ticket",
       );
     } finally {
       setBusy(null);
@@ -153,10 +226,6 @@ export function TicketPage() {
   return (
     <div>
       <h1 className="page-title">Ticket</h1>
-      <p className="page-sub">
-        Escanea el código, elige menudeo o mayoreo y cierra la venta. El lote pasa
-        de Disponible a Vendido solo si el ticket se imprime.
-      </p>
       {error && <div className="error">{error}</div>}
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
@@ -169,7 +238,6 @@ export function TicketPage() {
                 className={item.id === storeId ? "btn" : "btn secondary"}
                 onClick={() => {
                   setStoreId(item.id);
-                  setCustomerId("");
                   setBarcodes([]);
                   setPreview(null);
                 }}
@@ -179,7 +247,27 @@ export function TicketPage() {
             ))}
           </div>
         )}
-        <div className="form-inline">
+        <form className="form-inline" onSubmit={addBarcode}>
+          <div className="form-row" style={{ marginBottom: 0, flex: 1.4 }}>
+            <label>Escaneo</label>
+            <input
+              value={barcode}
+              autoFocus
+              readOnly={scanSealed || busy === "scan"}
+              placeholder="ID del producto, ej. P0004"
+              onKeyDown={onScanKeyDown}
+              onChange={(event) => onScanChange(event.target.value)}
+              onPaste={(event) => {
+                const text = event.clipboardData.getData("text").trim();
+                if (text.length < 3 || scanSealed || busy === "scan") return;
+                event.preventDefault();
+                fromScanner.current = true;
+                barcodeRef.current = text;
+                setBarcode(text);
+                setScanSealed(true);
+              }}
+            />
+          </div>
           <div className="form-row" style={{ marginBottom: 0 }}>
             <label>Categoría</label>
             <select
@@ -224,33 +312,6 @@ export function TicketPage() {
               <option value="Transferencia">Transferencia</option>
             </select>
           </div>
-          <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-            <label>Cliente</label>
-            <select
-              value={customerId}
-              onChange={(event) => setCustomerId(event.target.value)}
-            >
-              <option value="">Público en general</option>
-              {customers
-                .filter((item) => item.category === category)
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-            </select>
-          </div>
-        </div>
-        <form className="form-inline" style={{ marginTop: "0.85rem" }} onSubmit={addBarcode}>
-          <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-            <label>Escaneo</label>
-            <input
-              value={barcode}
-              autoFocus
-              placeholder="Código de barras del lote"
-              onChange={(event) => setBarcode(event.target.value)}
-            />
-          </div>
           <button className="btn" type="submit" disabled={busy !== null || !barcode.trim()}>
             {busy === "scan" ? "Buscando…" : "Agregar"}
           </button>
@@ -264,7 +325,7 @@ export function TicketPage() {
               <th>Producto</th>
               <th>Código</th>
               <th>Precio</th>
-              <th>Promo</th>
+              <th>Descuento</th>
               <th>A cobrar</th>
               <th></th>
             </tr>
@@ -275,7 +336,7 @@ export function TicketPage() {
                 <td>{line.productName}</td>
                 <td>{line.barcode}</td>
                 <td>${line.unitPrice.toFixed(2)}</td>
-                <td>{line.promotionName ?? "—"}</td>
+                <td>{line.discount > 0 ? `-$${line.discount.toFixed(2)}` : "$0.00"}</td>
                 <td>${line.finalPrice.toFixed(2)}</td>
                 <td>
                   <button
@@ -303,13 +364,22 @@ export function TicketPage() {
             {preview.discountTotal.toFixed(2)} · Total ${preview.total.toFixed(2)}
           </p>
         )}
+        <div className="form-row" style={{ marginTop: "0.85rem" }}>
+          <label>Correo del cliente</label>
+          <input
+            type="email"
+            value={email}
+            placeholder="correo del cliente"
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </div>
         <button
           className="btn"
           type="button"
-          disabled={!preview || busy !== null}
+          disabled={!preview || busy !== null || !emailOk}
           onClick={() => void closeSale()}
         >
-          {busy === "print" ? "Imprimiendo…" : "Imprimir ticket y cerrar venta"}
+          {busy === "send" ? "Enviando…" : "Enviar ticket por correo y cerrar venta"}
         </button>
       </div>
 
@@ -318,10 +388,58 @@ export function TicketPage() {
           <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
             Venta {ticket.sale.folio}
           </h2>
-          <p className="page-sub">Ticket impreso. Total ${ticket.sale.total.toFixed(2)}.</p>
+          <p className="page-sub">
+            {ticket.emailed
+              ? `Recibo enviado a ${ticket.email}. Total $${ticket.sale.total.toFixed(2)}.`
+              : `La venta quedó cerrada, pero el recibo no se envió a ${ticket.email}. Total $${ticket.sale.total.toFixed(2)}.`}
+          </p>
           <pre className="ticket-preview">{ticket.ticketText}</pre>
         </div>
       )}
+
+      <div className="panel" style={{ marginTop: "1rem" }}>
+        <h2 className="page-title" style={{ fontSize: "1.2rem" }}>
+          Últimos 5 tickets
+        </h2>
+        {recent.length === 0 ? (
+          <p className="page-sub">Esta sucursal todavía no tiene tickets cerrados.</p>
+        ) : (
+          recent.map((item) => (
+            <div key={item.folio} style={{ marginTop: "0.75rem" }}>
+              <div className="form-inline">
+                <div style={{ flex: 1 }}>
+                  <strong>{item.folio}</strong>
+                  <p className="page-sub" style={{ margin: "0.15rem 0 0" }}>
+                    {new Date(item.createdAt).toLocaleString("es-MX")} · $
+                    {item.total.toFixed(2)} · {item.email ?? "Sin correo"}
+                    {item.email
+                      ? item.emailed
+                        ? " · enviado"
+                        : " · no salió por correo"
+                      : ""}
+                  </p>
+                </div>
+                <button
+                  className="btn secondary"
+                  type="button"
+                  onClick={() =>
+                    setOpenFolio((current) =>
+                      current === item.folio ? null : item.folio,
+                    )
+                  }
+                >
+                  {openFolio === item.folio ? "Ocultar" : "Ver"}
+                </button>
+              </div>
+              {openFolio === item.folio && (
+                <pre ref={openTicketRef} className="ticket-preview">
+                  {item.ticketText}
+                </pre>
+              )}
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

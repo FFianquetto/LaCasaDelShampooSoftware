@@ -1,5 +1,7 @@
+import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
 
 function defaultDataDir(): string {
   if (process.env.LCDS_DATA_DIR) return process.env.LCDS_DATA_DIR;
@@ -30,3 +32,70 @@ export const config = {
     | "simulate"
     | "system",
 };
+
+function envFilePath(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "../../..", ".env");
+}
+
+function readEnvFile(): Record<string, string> {
+  const values: Record<string, string> = {};
+  let text = "";
+  try {
+    text = fs.readFileSync(envFilePath(), "utf8");
+  } catch {
+    return values;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let value = trimmed.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    values[key] = value;
+  }
+  return values;
+}
+
+function envValue(key: string): string {
+  const fromFile = readEnvFile()[key]?.trim();
+  if (fromFile) return fromFile;
+  return (process.env[key] || "").trim();
+}
+
+function smtpHostFor(email: string): string {
+  const domain = email.toLowerCase().split("@")[1] ?? "";
+  if (domain === "gmail.com" || domain === "googlemail.com") return "smtp.gmail.com";
+  if (
+    domain.startsWith("outlook.") ||
+    domain.startsWith("hotmail.") ||
+    domain.startsWith("live.") ||
+    domain === "msn.com"
+  ) {
+    return "smtp-mail.outlook.com";
+  }
+  return "";
+}
+
+export function mailSettings(): {
+  host: string;
+  port: number;
+  user: string;
+  pass: string;
+  from: string;
+} | null {
+  const user = envValue("LCDS_SMTP_USER");
+  const pass = envValue("LCDS_SMTP_PASS");
+  const from = envValue("LCDS_SMTP_FROM") || user;
+  const host = envValue("LCDS_SMTP_HOST") || smtpHostFor(from);
+  const port = Number(envValue("LCDS_SMTP_PORT") || 587);
+  if (!host || !user || !pass || !from) return null;
+  return { host, port, user, pass, from };
+}

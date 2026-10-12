@@ -4,6 +4,7 @@ import {
   createProductSchema,
   createLotSchema,
   createCustomerSchema,
+  updateCustomerRuleSchema,
   upsertPriceSchema,
   createUserSchema,
   createPromotionSchema,
@@ -24,6 +25,7 @@ import {
   getLotByBarcode,
   listCustomers,
   createCustomer,
+  updateCustomerRule,
   listPrices,
   upsertPrice,
   listUsers,
@@ -34,9 +36,10 @@ import {
   createPromotion,
   setPromotionActive,
 } from "../services/catalog.js";
-import { previewSale, commitSale } from "../services/sales.js";
+import { previewSale, commitSale, listRecentTickets } from "../services/sales.js";
 import {
   salesReport,
+  productSalesReport,
   inventorySummary,
   exportCatalog,
   importCatalog,
@@ -183,21 +186,40 @@ apiRouter.post(
 );
 
 apiRouter.get("/customers", requireAuth, (req: AuthedRequest, res) => {
+  const isAdmin = req.user?.role === UserRole.Admin;
   const requested = req.query.storeId as string | undefined;
   const storeId =
     req.user?.role === UserRole.Empleado ? req.user.storeId : requested || undefined;
-  res.json(listCustomers(getDb(), storeId));
+  res.json(listCustomers(getDb(), storeId, isAdmin));
 });
 
 apiRouter.post("/customers", requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const body = createCustomerSchema.parse(req.body);
-    if (req.user?.role === UserRole.Empleado) body.storeId = req.user.storeId;
+    if (req.user?.role === UserRole.Empleado) {
+      body.storeId = req.user.storeId;
+      delete body.clientNumber;
+      delete body.purchaseEveryDays;
+    }
     res.status(201).json(createCustomer(getDb(), body));
   } catch (err) {
     next(err);
   }
 });
+
+apiRouter.patch(
+  "/customers/:id",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const body = updateCustomerRuleSchema.parse(req.body);
+      res.json(updateCustomerRule(getDb(), param(req.params.id), body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 apiRouter.get(
   "/prices",
@@ -291,9 +313,28 @@ apiRouter.patch(
   },
 );
 
+apiRouter.get("/sales/recent", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const storeId =
+      req.user.role === UserRole.Empleado
+        ? req.user.storeId
+        : String(req.query.storeId ?? "");
+    if (!storeId) {
+      res.json([]);
+      return;
+    }
+    res.json(listRecentTickets(getDb(), storeId, 5));
+  } catch (err) {
+    next(err);
+  }
+});
+
 apiRouter.post("/sales/preview", requireAuth, (req, res, next) => {
   try {
-    const body = commitSaleSchema.omit({ printTicket: true }).parse(req.body);
+    const body = commitSaleSchema
+      .omit({ printTicket: true, email: true })
+      .parse(req.body);
     const session = req as AuthedRequest;
     if (session.user?.role === UserRole.Empleado) {
       body.storeId = session.user.storeId;
@@ -321,15 +362,32 @@ apiRouter.post("/sales/commit", requireAuth, async (req: AuthedRequest, res, nex
 apiRouter.get("/reports/sales", requireAuth, (req: AuthedRequest, res, next) => {
   try {
     const query = reportQuerySchema.parse(req.query);
+    const isAdmin = req.user?.role === UserRole.Admin;
     const storeId =
       req.user?.role === UserRole.Empleado
         ? req.user.storeId
         : query.storeId;
-    res.json(salesReport(getDb(), { ...query, storeId }));
+    res.json(
+      salesReport(getDb(), { ...query, storeId }, { cashCut: isAdmin }),
+    );
   } catch (err) {
     next(err);
   }
 });
+
+apiRouter.get(
+  "/reports/products",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = reportQuerySchema.parse(req.query);
+      res.json(productSalesReport(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 apiRouter.get("/reports/inventory", requireAuth, (req: AuthedRequest, res) => {
   const storeId =

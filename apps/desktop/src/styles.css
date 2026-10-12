@@ -76,10 +76,10 @@ a {
 .brand small {
   display: block;
   font-family: var(--font);
-  font-size: 0.75rem;
-  opacity: 0.75;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 700;
   margin-top: 0.25rem;
+  color: #f4fff9;
 }
 
 .nav {
@@ -98,6 +98,14 @@ a {
 .nav a:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
+}
+
+.nav-disabled {
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  color: rgba(244, 255, 249, 0.38);
+  cursor: not-allowed;
+  user-select: none;
 }
 
 .sidebar-footer {
@@ -122,6 +130,11 @@ a {
 .page-sub {
   color: var(--muted);
   margin: 0 0 1.25rem;
+}
+
+.store-name {
+  color: var(--brand-deep);
+  font-weight: 700;
 }
 
 .panel {
@@ -188,11 +201,13 @@ a {
 }
 
 .catalog-toolbar select {
-  flex: 0 0 210px;
+  flex: 0 0 auto;
+  width: auto;
+  height: 2.75rem;
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 10px;
-  padding: 0.65rem 0.7rem;
+  padding: 0 0.75rem;
 }
 
 .row-tacha td {
@@ -213,7 +228,8 @@ a {
   cursor: pointer;
 }
 
-.row-link:hover {
+.row-link:hover,
+.row-link.selected {
   background: #f6f1e6;
 }
 
@@ -239,20 +255,44 @@ a {
 .catalog-toolbar {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  flex-wrap: nowrap;
+  gap: 0.6rem;
 }
 
-.catalog-toolbar input {
-  flex: 1;
-  min-width: 220px;
+.catalog-toolbar .btn {
+  height: 2.75rem;
+  padding: 0 1rem;
+}
+
+.catalog-search-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.catalog-toolbar input,
+.catalog-search {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 2.75rem;
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 10px;
-  padding: 0.65rem 0.75rem;
+  padding: 0 0.75rem;
+}
+
+.cell-end {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
 }
 
 .catalog-toolbar .store-buttons {
   margin-left: 0;
+  gap: 0.6rem;
 }
 
 .store-buttons {
@@ -260,6 +300,24 @@ a {
   gap: 0.4rem;
   margin-left: auto;
   flex-shrink: 0;
+}
+
+.icon-btn {
+  width: 2.15rem;
+  height: 2.15rem;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: 8px;
+  background: var(--brand);
+  color: #fff;
+  cursor: pointer;
+}
+
+.icon-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
 }
 
 .btn {
@@ -330,6 +388,7 @@ a {
   background: #fff;
   border-radius: 10px;
   padding: 0.85rem;
+  scroll-margin-top: 1rem;
 }
 
 .table-wrap {
@@ -377,6 +436,22 @@ th {
 .badge.warn {
   background: #f8e4d4;
   color: var(--accent);
+}
+
+.badge.late {
+  background: #fde8e8;
+  color: var(--danger);
+}
+
+.row-late {
+  background: #fff6f6;
+}
+
+.stat span {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .badge.muted {

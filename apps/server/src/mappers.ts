@@ -32,6 +32,7 @@ export function mapUser(row: Record<string, unknown>): User {
     role: row.role as UserRole,
     username: String(row.username),
     fullName: String(row.full_name),
+    phone: row.phone == null || row.phone === "" ? null : String(row.phone),
     active: intToBool(row.active as number),
     createdAt: String(row.created_at),
   };
@@ -45,6 +46,7 @@ export function mapProduct(row: Record<string, unknown>): Product {
     brand: row.brand == null ? null : String(row.brand),
     category: row.category == null ? null : String(row.category),
     code: row.code == null ? null : String(row.code),
+    barcode: row.barcode == null ? null : String(row.barcode),
     cost: row.cost == null ? null : Number(row.cost),
     description: row.description == null ? null : String(row.description),
     active: intToBool(row.active as number),
@@ -70,9 +72,17 @@ export function mapCustomer(row: Record<string, unknown>): Customer {
     name: String(row.name),
     category: row.category as CustomerCategory,
     phone: row.phone == null ? null : String(row.phone),
+    email: row.email == null || row.email === "" ? null : String(row.email),
     storeId: row.store_id == null ? null : String(row.store_id),
+    clientNumber:
+      row.client_number == null || row.client_number === ""
+        ? null
+        : String(row.client_number),
+    purchaseEveryDays:
+      row.purchase_every_days == null ? null : Number(row.purchase_every_days),
     active: intToBool(row.active as number),
     createdAt: String(row.created_at),
+    frequency: null,
   };
 }
 

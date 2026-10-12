@@ -7,7 +7,6 @@ import { CustomersPage } from "./pages/CustomersPage";
 import { PricesPage } from "./pages/PricesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { ReportsPage } from "./pages/ReportsPage";
-import { SyncPage } from "./pages/SyncPage";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { user, store, logout, isAdmin } = useAuth();
@@ -17,7 +16,9 @@ function Shell({ children }: { children: React.ReactNode }) {
       <aside className="sidebar">
         <div className="brand">
           La Casa del Shampoo
-          {!isAdmin && storeLabel && <small>{storeLabel}</small>}
+          {!isAdmin && storeLabel && (
+            <small>{storeLabel}</small>
+          )}
         </div>
         <nav className="nav">
           {isAdmin ? (
@@ -27,7 +28,9 @@ function Shell({ children }: { children: React.ReactNode }) {
               <NavLink to="/clientes">Clientes</NavLink>
               <NavLink to="/precios">Precios</NavLink>
               <NavLink to="/empleados">Empleados</NavLink>
-              <NavLink to="/sync">Sync multi-tienda</NavLink>
+              <span className="nav-disabled" title="Inhabilitado por ahora">
+                Sync multi-tienda
+              </span>
               <NavLink to="/reportes">Reportes</NavLink>
             </>
           ) : (
@@ -139,7 +142,10 @@ export function App() {
         element={
           <Private>
             <AdminOnly>
-              <SyncPage />
+              <div>
+                <h1 className="page-title">Sync multi-tienda</h1>
+                <p className="page-sub">Esta sección está inhabilitada por ahora.</p>
+              </div>
             </AdminOnly>
           </Private>
         }

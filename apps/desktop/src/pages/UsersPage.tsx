@@ -10,6 +10,7 @@ export function UsersPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<UserRole>("Empleado");
   const [storeId, setStoreId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -39,6 +40,7 @@ export function UsersPage() {
           username,
           password,
           fullName,
+          phone: phone.trim(),
           role,
           storeId,
         }),
@@ -46,6 +48,7 @@ export function UsersPage() {
       setUsername("");
       setPassword("");
       setFullName("");
+      setPhone("");
       await load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Error");
@@ -108,6 +111,14 @@ export function UsersPage() {
             />
           </div>
           <div className="form-row" style={{ marginBottom: 0 }}>
+            <label>Teléfono</label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              required
+            />
+          </div>
+          <div className="form-row" style={{ marginBottom: 0 }}>
             <label>Rol</label>
             <select
               value={role}
@@ -141,22 +152,22 @@ export function UsersPage() {
             <tr>
               <th>Usuario</th>
               <th>Nombre</th>
+              <th>Teléfono</th>
               <th>Rol</th>
               <th>Sucursal</th>
-              <th>Activo</th>
-              <th></th>
+              <th />
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {users.filter((u) => u.active).map((u) => (
               <tr key={u.id}>
                 <td>{u.username}</td>
                 <td>{u.fullName}</td>
+                <td>{u.phone ?? "—"}</td>
                 <td>{u.role}</td>
                 <td>{storeCode(u.storeId)}</td>
-                <td>{u.active ? "Sí" : "No"}</td>
-                <td>
-                  {u.active && u.id !== me?.id ? (
+                <td className="cell-end">
+                  {u.id !== me?.id ? (
                     <button
                       className="btn danger"
                       type="button"

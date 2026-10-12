@@ -64,6 +64,29 @@ export const CUSTOMER_CATEGORY_LABELS: Record<CustomerCategory, string> = {
   Reparto: "Reparto",
 };
 
+/** Distribuidoras: llevan número de cliente y regla de frecuencia. */
+export function isDistributorCategory(category: CustomerCategory): boolean {
+  return category === "Distribuidor" || category === "Foraneo";
+}
+
+/** Plazo por defecto: una compra al mes. */
+export const DEFAULT_PURCHASE_EVERY_DAYS = 30;
+
+export const PURCHASE_RULE_PRESETS = [
+  { days: 7, label: "Cada semana" },
+  { days: 15, label: "Cada 15 días" },
+  { days: 30, label: "Una vez al mes" },
+  { days: 60, label: "Cada 2 meses" },
+  { days: 90, label: "Cada 3 meses" },
+] as const;
+
+export function purchaseRuleLabel(days: number): string {
+  return (
+    PURCHASE_RULE_PRESETS.find((item) => item.days === days)?.label ??
+    `Cada ${days} días`
+  );
+}
+
 export const STORE_CODES = ["AME", "HEN", "CHI"] as const;
 export type StoreCode = (typeof STORE_CODES)[number];
 

@@ -254,6 +254,36 @@ CREATE INDEX IF NOT EXISTS idx_lots_product_store_status
   ON lots(product_id, store_id, status);
 `;
 
+export const MIGRATION_008 = `
+ALTER TABLE customers ADD COLUMN client_number TEXT;
+ALTER TABLE customers ADD COLUMN purchase_every_days INTEGER;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_client_number
+  ON customers(client_number)
+  WHERE client_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
+CREATE INDEX IF NOT EXISTS idx_sale_items_product ON sale_items(product_id);
+`;
+
+export const MIGRATION_009 = `
+ALTER TABLE products ADD COLUMN barcode TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_products_barcode
+  ON products(barcode)
+  WHERE barcode IS NOT NULL;
+`;
+
+export const MIGRATION_010 = `
+ALTER TABLE sales ADD COLUMN ticket_email TEXT;
+ALTER TABLE sales ADD COLUMN ticket_emailed INTEGER NOT NULL DEFAULT 0;
+`;
+
+export const MIGRATION_011 = `
+ALTER TABLE customers ADD COLUMN email TEXT;
+`;
+
+export const MIGRATION_012 = `
+ALTER TABLE users ADD COLUMN phone TEXT;
+`;
+
 export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 1, name: "001_initial_schema", sql: MIGRATION_001 },
   { id: 2, name: "002_excel_categories_brand_cost", sql: MIGRATION_002 },
@@ -262,4 +292,9 @@ export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 5, name: "005_customer_store", sql: MIGRATION_005 },
   { id: 6, name: "006_inventory_marks", sql: MIGRATION_006 },
   { id: 7, name: "007_lot_stock_index", sql: MIGRATION_007 },
+  { id: 8, name: "008_customer_purchase_rule", sql: MIGRATION_008 },
+  { id: 9, name: "009_product_barcode", sql: MIGRATION_009 },
+  { id: 10, name: "010_sale_ticket_email", sql: MIGRATION_010 },
+  { id: 11, name: "011_customer_email", sql: MIGRATION_011 },
+  { id: 12, name: "012_user_phone", sql: MIGRATION_012 },
 ];

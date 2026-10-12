@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Store } from "@lcds/shared";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { StoreName } from "../StoreName";
 
 type Period = "dia" | "semana" | "mes";
 
@@ -14,8 +15,28 @@ type Report = {
     employeeName: string;
     storeCode: string;
     saleType: string;
+    paymentMethod: string | null;
   }[];
   totals: { salesCount: number; lotsSold: number; revenue: number };
+  cashCut?: {
+    efectivo: number;
+    tarjeta: number;
+    transferencia: number;
+    sinMetodo: number;
+    counts: {
+      efectivo: number;
+      tarjeta: number;
+      transferencia: number;
+      sinMetodo: number;
+    };
+    byStore: {
+      storeCode: string;
+      storeName: string;
+      efectivo: number;
+      tarjeta: number;
+      transferencia: number;
+    }[];
+  };
 };
 
 function startOfDay(date: Date) {
@@ -103,7 +124,7 @@ export function ReportsPage() {
     <div>
       <h1 className="page-title">Reportes</h1>
       <p className="page-sub">
-        Hoy es {todayLabel}. Ventas de {storeLabel}.
+        Hoy es {todayLabel}. Ventas de <StoreName name={storeLabel} dot />
       </p>
       {error && <div className="error">{error}</div>}
       <div className="panel" style={{ marginBottom: "1rem" }}>
@@ -157,56 +178,125 @@ export function ReportsPage() {
             </div>
           </div>
 
-          {period === "dia" ? (
-            <div className="panel table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Folio</th>
-                    <th>Fecha</th>
-                    <th>Sucursal</th>
-                    <th>Cajero</th>
-                    <th>Tipo</th>
-                    <th>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.sales.length === 0 ? (
-                    <tr>
-                      <td colSpan={6}>Sin ventas este día.</td>
-                    </tr>
-                  ) : (
-                    report.sales.map((sale) => (
-                      <tr key={sale.id}>
-                        <td>{sale.folio}</td>
-                        <td>{new Date(sale.createdAt).toLocaleString("es-MX")}</td>
-                        <td>{sale.storeCode}</td>
-                        <td>{sale.employeeName}</td>
-                        <td>{sale.saleType}</td>
-                        <td>${sale.total.toFixed(2)}</td>
+          {period === "dia" && report.cashCut && (
+            <div className="panel" style={{ marginBottom: "1rem" }}>
+              <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
+                Corte del día
+              </h2>
+              <p className="page-sub">
+                Efectivo es lo que debe haber en caja. Tarjeta es lo que debe
+                coincidir con la terminal. La transferencia está en el banco y no
+                entra ni a la caja ni a la terminal.
+              </p>
+              <div className="stats">
+                <div className="stat">
+                  Efectivo en caja
+                  <strong>${report.cashCut.efectivo.toFixed(2)}</strong>
+                  <span>{report.cashCut.counts.efectivo} ventas</span>
+                </div>
+                <div className="stat">
+                  Tarjeta en terminal
+                  <strong>${report.cashCut.tarjeta.toFixed(2)}</strong>
+                  <span>{report.cashCut.counts.tarjeta} ventas</span>
+                </div>
+                <div className="stat">
+                  Transferencia
+                  <strong>${report.cashCut.transferencia.toFixed(2)}</strong>
+                  <span>{report.cashCut.counts.transferencia} ventas</span>
+                </div>
+              </div>
+              {report.cashCut.sinMetodo > 0 && (
+                <p className="notice">
+                  Hay ${report.cashCut.sinMetodo.toFixed(2)} en ventas sin método de
+                  pago. No se suman a la caja ni a la terminal.
+                </p>
+              )}
+              {report.cashCut.byStore.length > 1 && (
+                <div className="table-wrap">
+                  <p className="page-sub" style={{ marginTop: 0 }}>
+                    El efectivo de cada sucursal se cuenta por separado.
+                  </p>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Sucursal</th>
+                        <th>Efectivo</th>
+                        <th>Tarjeta</th>
+                        <th>Transferencia</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={5}>Total del día</td>
-                    <td>${report.totals.revenue.toFixed(2)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          ) : (
-            <div className="panel">
-              <p className="page-sub" style={{ marginTop: 0 }}>
-                Reporte general {period === "semana" ? "de la semana" : "del mes"}, sin
-                el listado de cada venta.
-              </p>
-              <p className="report-total">
-                Total: ${report.totals.revenue.toFixed(2)}
-              </p>
+                    </thead>
+                    <tbody>
+                      {report.cashCut.byStore.map((row) => (
+                        <tr key={row.storeCode}>
+                          <td>
+                            <StoreName
+                              name={row.storeName.replace("La Casa del Shampoo — ", "")}
+                            />
+                          </td>
+                          <td>${row.efectivo.toFixed(2)}</td>
+                          <td>${row.tarjeta.toFixed(2)}</td>
+                          <td>${row.transferencia.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
+
+          <div className="panel table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Folio</th>
+                  <th>Fecha</th>
+                  <th>Sucursal</th>
+                  <th>Cajero</th>
+                  <th>Tipo</th>
+                  <th>Pago</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.sales.length === 0 ? (
+                  <tr>
+                    <td colSpan={7}>
+                      {period === "dia"
+                        ? "Sin ventas este día."
+                        : period === "semana"
+                          ? "Sin ventas esta semana."
+                          : "Sin ventas este mes."}
+                    </td>
+                  </tr>
+                ) : (
+                  report.sales.map((sale) => (
+                    <tr key={sale.id}>
+                      <td>{sale.folio}</td>
+                      <td>{new Date(sale.createdAt).toLocaleString("es-MX")}</td>
+                      <td>{sale.storeCode}</td>
+                      <td>{sale.employeeName}</td>
+                      <td>{sale.saleType}</td>
+                      <td>{sale.paymentMethod ?? "Sin método"}</td>
+                      <td>${sale.total.toFixed(2)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={6}>
+                    {period === "dia"
+                      ? "Total del día"
+                      : period === "semana"
+                        ? "Total de la semana"
+                        : "Total del mes"}
+                  </td>
+                  <td>${report.totals.revenue.toFixed(2)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </>
       )}
     </div>

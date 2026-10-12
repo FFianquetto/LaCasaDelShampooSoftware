@@ -83,6 +83,41 @@ export function migrate(db: Db): void {
         continue;
       }
 
+      if (migration.id === 8 && tableHasColumn(db, "customers", "client_number")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
+      if (migration.id === 12 && tableHasColumn(db, "users", "phone")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
+      if (migration.id === 11 && tableHasColumn(db, "customers", "email")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
+      if (migration.id === 10 && tableHasColumn(db, "sales", "ticket_email")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
+      if (migration.id === 9 && tableHasColumn(db, "products", "barcode")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
       db.exec(migration.sql);
       db.prepare(
         "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
@@ -92,29 +127,127 @@ export function migrate(db: Db): void {
 
   run();
   assignProductCodes(db);
+  syncProductBarcodes(db);
+  assignDistributorDefaults(db);
+}
+
+const PRODUCT_CODE_SCHEME = "category-brand-name-v1";
+
+function formatProductCode(index: number): string {
+  return `P${String(index).padStart(4, "0")}`;
+}
+
+function nextProductCodeNumber(db: Db): number {
+  const rows = db
+    .prepare("SELECT code FROM products WHERE code GLOB 'P[0-9]*'")
+    .all() as { code: string }[];
+  let max = 0;
+  for (const row of rows) {
+    const value = Number(row.code.slice(1));
+    if (Number.isInteger(value)) max = Math.max(max, value);
+  }
+  return max + 1;
 }
 
 function assignProductCodes(db: Db): void {
   if (!tableHasColumn(db, "products", "code")) return;
-  const missing = (
-    db
-      .prepare(
-        "SELECT COUNT(*) AS c FROM products WHERE code IS NULL OR code = ''",
-      )
-      .get() as { c: number }
-  ).c;
-  if (missing === 0) return;
+  const order = `
+    ORDER BY IFNULL(category, 'Otros') COLLATE NOCASE,
+             IFNULL(brand, '') COLLATE NOCASE,
+             name COLLATE NOCASE,
+             id
+  `;
 
-  const rows = db
+  if (getMeta(db, "product_code_scheme") !== PRODUCT_CODE_SCHEME) {
+    const rows = db
+      .prepare(`SELECT id FROM products ${order}`)
+      .all() as { id: string }[];
+    const update = db.prepare("UPDATE products SET code = ? WHERE id = ?");
+    const tx = db.transaction(() => {
+      rows.forEach((row, index) => {
+        update.run(`TMP${String(index + 1).padStart(6, "0")}`, row.id);
+      });
+      rows.forEach((row, index) => {
+        update.run(formatProductCode(index + 1), row.id);
+      });
+    });
+    tx();
+    setMeta(db, "product_code_scheme", PRODUCT_CODE_SCHEME);
+    return;
+  }
+
+  const missing = db
     .prepare(
-      "SELECT id FROM products ORDER BY brand COLLATE NOCASE, name COLLATE NOCASE",
+      `SELECT id FROM products
+       WHERE code IS NULL OR code = ''
+       ${order}`,
     )
     .all() as { id: string }[];
+  if (missing.length === 0) return;
+
+  let next = nextProductCodeNumber(db);
   const update = db.prepare("UPDATE products SET code = ? WHERE id = ?");
   const tx = db.transaction(() => {
-    rows.forEach((row, index) => {
-      update.run(`P${String(index + 1).padStart(4, "0")}`, row.id);
-    });
+    for (const row of missing) {
+      update.run(formatProductCode(next), row.id);
+      next += 1;
+    }
+  });
+  tx();
+}
+
+function syncProductBarcodes(db: Db): void {
+  if (!tableHasColumn(db, "products", "barcode")) return;
+  if (!tableHasColumn(db, "products", "code")) return;
+  db.prepare(
+    `UPDATE products
+     SET barcode = code
+     WHERE code IS NOT NULL AND code != ''
+       AND (barcode IS NULL OR barcode = '')`,
+  ).run();
+}
+
+function assignDistributorDefaults(db: Db): void {
+  if (!tableHasColumn(db, "customers", "client_number")) return;
+  if (!tableHasColumn(db, "customers", "purchase_every_days")) return;
+
+  db.prepare(
+    `UPDATE customers
+     SET purchase_every_days = 30
+     WHERE category IN ('Distribuidor', 'Foraneo')
+       AND purchase_every_days IS NULL`,
+  ).run();
+
+  const missing = db
+    .prepare(
+      `SELECT id FROM customers
+       WHERE category IN ('Distribuidor', 'Foraneo')
+         AND (client_number IS NULL OR client_number = '')
+       ORDER BY created_at, name`,
+    )
+    .all() as { id: string }[];
+  if (missing.length === 0) return;
+
+  const existing = db
+    .prepare(
+      `SELECT client_number FROM customers
+       WHERE client_number GLOB 'D-[0-9]*'`,
+    )
+    .all() as { client_number: string }[];
+  let max = 0;
+  for (const row of existing) {
+    const value = Number(row.client_number.slice(2));
+    if (Number.isInteger(value)) max = Math.max(max, value);
+  }
+
+  const update = db.prepare(
+    "UPDATE customers SET client_number = ? WHERE id = ?",
+  );
+  const tx = db.transaction(() => {
+    for (const row of missing) {
+      max += 1;
+      update.run(`D-${String(max).padStart(4, "0")}`, row.id);
+    }
   });
   tx();
 }

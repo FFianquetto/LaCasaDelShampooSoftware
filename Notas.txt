@@ -6,3 +6,15 @@ Poder plantear una regla, por ello es necesario implementarlo en Clientes.
 Productos reporte de venta por producto.
 
 Al final del día poder hacer el corte de cuanto se debe tener en efectivo o cuanto por tarjeta.
+
+
+Quedan 5 fotos en esa carpeta porque no hay un producto del catálogo con ese nombre:
+
+Jabón de café y extracto de algas. La seda de algas marinas es otro producto.
+Crema de tomillo. Ese producto ya tenía su foto.
+Acondicionador de batana, 500 ml. En el catálogo están el shampoo y el aceite de batana, no el acondicionador.
+Crema despigmentante. No es la crema dermawhite.
+Barro negro con baba de caracol. No está en el listado.
+Si me das el nombre con el que deben venderse esos cinco, los dejo en su ficha.
+
+

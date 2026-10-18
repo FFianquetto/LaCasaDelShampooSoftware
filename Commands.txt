@@ -1,17 +1,16 @@
 Commands
 
+
+cd "C:\Users\cuale\Music\Fer_UANL\9no Semestre\0_Clientes\LaCasaDelShampoo\Software"
+npm run dev:desktop
+
 cd "C:\Users\cuale\Music\Fer_UANL\9no Semestre\0_Clientes\LaCasaDelShampoo\Software"
 $env:LCDS_DATA_DIR = "$PWD\data"
 $env:LCDS_PRINT_MODE = "simulate"
 npm run dev:server
 
-# El recibo sale al correo del cliente. La cuenta que envía va en .env:
-# LCDS_SMTP_USER, LCDS_SMTP_PASS, LCDS_SMTP_FROM
+http://127.0.0.1:5000/
 
-cd "C:\Users\cuale\Music\Fer_UANL\9no Semestre\0_Clientes\LaCasaDelShampoo\Software"
-npm run dev:desktop
-
-http://127.0.0.1:5000/.
 
 admin / Admin#12
 usuario / Venta#01 - Americas
@@ -22,3 +21,7 @@ usuario2 / Venta#03 - Chihuahua
 
 Ver tablas:
 node --input-type=module -e "import Database from 'better-sqlite3'; const db=new Database('data/lacasadelshampoo.db'); console.table(db.prepare(`SELECT name FROM sqlite_master WHERE type='table' ORDER BY name`).all()); db.close();" 
+
+# El recibo sale al correo del cliente. La cuenta que envía va en .env:
+# LCDS_SMTP_USER, LCDS_SMTP_PASS, LCDS_SMTP_FROM
+

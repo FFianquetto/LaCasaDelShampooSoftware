@@ -97,7 +97,7 @@ export function mailSettings(): {
   from: string;
 } | null {
   const user = envValue("LCDS_SMTP_USER");
-  const pass = envValue("LCDS_SMTP_PASS");
+  const pass = envValue("LCDS_SMTP_PASS").replace(/\s+/g, "");
   const from = envValue("LCDS_SMTP_FROM") || user;
   const host = envValue("LCDS_SMTP_HOST") || smtpHostFor(from);
   const port = Number(envValue("LCDS_SMTP_PORT") || 587);

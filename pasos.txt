@@ -1,0 +1,53 @@
+PASOS — Pruebas en tienda (Operación tienda)
+
+CORREO DE ENVÍO (lo da el cliente — una sola cuenta de la tienda)
+- Se configura una vez. No se cambia por sesión ni por cada cliente.
+- El cliente del mostrador solo escribe su correo al cerrar el ticket.
+- La contraseña de aplicación dura hasta que la borren en Google/Microsoft.
+
+Cómo generar la contraseña (Gmail):
+1. Activar verificación en 2 pasos:
+   https://myaccount.google.com/security
+2. Crear contraseña de aplicación (16 caracteres):
+   https://myaccount.google.com/apppasswords
+3. Pegarla sin espacios en el .env
+
+Outlook / Hotmail:
+   https://account.microsoft.com/security
+   (seguridad → contraseñas de aplicación)
+
+LO QUE NECESITO DEL CLIENTE
+1. Correo de la empresa (Gmail, Outlook o Hotmail) + contraseña de aplicación.
+   Sin esto el ticket no se envía. (El de prueba actual no es el final.)
+2. Un responsable por sucursal (nombre y WhatsApp).
+3. Confirmar PC Windows con internet e instalador ya puesto en cada tienda.
+
+QUÉ DEBE TENER / COMPRAR CADA TIENDA (para que funcione el escaneo)
+1. Lector de códigos de barras USB (modo teclado / plug and play).
+   Al escanear debe escribir el código solo, como si fuera un teclado.
+   Sirven Honeywell, Zebra, Symbol o genéricos USB HID.
+2. Impresora de etiquetas + rollos de etiquetas.
+3. Pegar en cada producto su ID (ej. P0001) como código de barras Code 39.
+   Sin etiqueta legible, el escáner no sirve.
+4. PC o laptop Windows 10/11 con puerto USB libre e internet.
+5. No hace falta impresora de tickets: el recibo va por correo.
+
+PRUEBAS QUE DEBE HACER Y MANDARME (captura o video corto)
+1. Abrir el programa e iniciar sesión.
+2. Escanear un producto y cerrar la venta.
+3. Una venta menudeo y una mayoreo.
+4. Poner el correo del cliente al cerrar y confirmar que llega el PDF.
+5. Si hay promoción activa, que el descuento se vea en el ticket.
+
+CUENTAS DEL SISTEMA
+admin / Admin#12
+usuario / Venta#01     (Americas)
+usuario1 / Venta#02    (Henequen)
+usuario2 / Venta#03    (Chihuahua)
+
+CONFIGURAR EN CADA PC
+Archivo: %APPDATA%\LaCasaDelShampoo\.env
+
+LCDS_SMTP_USER=correo_que_de_el_cliente
+LCDS_SMTP_PASS=contraseña_de_aplicacion_sin_espacios
+LCDS_SMTP_FROM=correo_que_de_el_cliente

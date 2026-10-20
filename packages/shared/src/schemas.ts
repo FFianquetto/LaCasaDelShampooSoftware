@@ -230,17 +230,41 @@ export type CreatePromotionInput = z.infer<typeof createPromotionSchema>;
 export const cartItemSchema = z.object({
   barcode: z.string().min(1),
 });
-export const commitSaleSchema = z.object({
+export const commitSaleBaseSchema = z.object({
   storeId: z.string().min(1),
   customerId: z.string().nullable().optional(),
   customerCategory: customerCategorySchema,
   saleType: saleTypeSchema,
   paymentMethod: paymentMethodSchema.optional(),
   barcodes: z.array(z.string().min(1)).min(1),
-  email: z.string().trim().email("Escribe un correo válido"),
+  deliveryChannel: z.enum(["email", "whatsapp"]).default("email"),
+  email: z.string().trim().optional(),
+  phone: z.string().trim().optional(),
   printTicket: z.boolean().default(true),
 });
-export type CommitSaleInput = z.infer<typeof commitSaleSchema>;
+
+export const commitSaleSchema = commitSaleBaseSchema.superRefine(
+  (value, ctx) => {
+    if (value.deliveryChannel === "email") {
+      if (!value.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["email"],
+          message: "Escribe un correo válido",
+        });
+      }
+    } else {
+      const digits = (value.phone ?? "").replace(/\D/g, "");
+      if (digits.length < 10 || digits.length > 15) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["phone"],
+          message: "Escribe un WhatsApp válido (10 dígitos)",
+        });
+      }
+    }
+  });
+export type CommitSaleInput = z.infer<typeof commitSaleBaseSchema>;
 
 export const reportQuerySchema = z.object({
   storeId: z.string().optional(),

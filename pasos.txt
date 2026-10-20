@@ -1,5 +1,15 @@
 PASOS — Pruebas en tienda (Operación tienda)
 
+TICKET: el cliente elige Correo o WhatsApp al cerrar la venta.
+
+WHATSAPP (opcional — sí ocupa API para que salga solo)
+- Sin API: el sistema abre WhatsApp con el ticket listo; la cajera da Enviar.
+  El PDF queda guardado en la PC, no se adjunta solo en ese modo.
+- Automático con PDF: WhatsApp Business (Meta Cloud API).
+  Crear cuenta y número: https://developers.facebook.com/docs/whatsapp/cloud-api
+  Ocupo del cliente: token, ID del número y plantilla aprobada (si aplica).
+  Eso va en el .env como LCDS_WHATSAPP_TOKEN y LCDS_WHATSAPP_PHONE_NUMBER_ID.
+
 CORREO DE ENVÍO (lo da el cliente — una sola cuenta de la tienda)
 - Se configura una vez. No se cambia por sesión ni por cada cliente.
 - El cliente del mostrador solo escribe su correo al cerrar el ticket.
@@ -30,13 +40,13 @@ QUÉ DEBE TENER / COMPRAR CADA TIENDA (para que funcione el escaneo)
 3. Pegar en cada producto su ID (ej. P0001) como código de barras Code 39.
    Sin etiqueta legible, el escáner no sirve.
 4. PC o laptop Windows 10/11 con puerto USB libre e internet.
-5. No hace falta impresora de tickets: el recibo va por correo.
+5. No hace falta impresora de tickets: el recibo va por correo o WhatsApp.
 
 PRUEBAS QUE DEBE HACER Y MANDARME (captura o video corto)
 1. Abrir el programa e iniciar sesión.
 2. Escanear un producto y cerrar la venta.
 3. Una venta menudeo y una mayoreo.
-4. Poner el correo del cliente al cerrar y confirmar que llega el PDF.
+4. Cerrar una venta por correo (confirmar PDF) y una por WhatsApp.
 5. Si hay promoción activa, que el descuento se vea en el ticket.
 
 CUENTAS DEL SISTEMA
@@ -51,3 +61,8 @@ Archivo: %APPDATA%\LaCasaDelShampoo\.env
 LCDS_SMTP_USER=correo_que_de_el_cliente
 LCDS_SMTP_PASS=contraseña_de_aplicacion_sin_espacios
 LCDS_SMTP_FROM=correo_que_de_el_cliente
+
+# Solo si quieren WhatsApp automático:
+LCDS_WHATSAPP_TOKEN=
+LCDS_WHATSAPP_PHONE_NUMBER_ID=
+LCDS_WHATSAPP_TEMPLATE=

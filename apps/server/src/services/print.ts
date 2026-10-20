@@ -21,6 +21,7 @@ export type TicketData = {
   total: number;
   paymentMethod?: string | null;
   email?: string | null;
+  phone?: string | null;
 };
 
 export function formatTicket(data: TicketData): string {
@@ -39,6 +40,7 @@ export function formatTicket(data: TicketData): string {
   if (data.paymentMethod) rows.push(`Pago: ${data.paymentMethod}`);
   if (data.customer) rows.push(`Cliente: ${data.customer}`);
   if (data.email) rows.push(`Correo: ${data.email}`);
+  if (data.phone) rows.push(`WhatsApp: ${data.phone}`);
   rows.push(dash);
   for (const item of data.lines) {
     rows.push(item.name.slice(0, w));

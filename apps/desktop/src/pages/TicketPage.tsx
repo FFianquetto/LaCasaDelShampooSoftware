@@ -6,6 +6,7 @@ import type {
   Store,
 } from "@lcds/shared";
 import { CUSTOMER_CATEGORY_LABELS } from "@lcds/shared";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
 
@@ -29,6 +30,10 @@ type CommitResult = {
   ticketText: string;
   emailed: boolean;
   email: string;
+  channel: "email" | "whatsapp";
+  destination: string;
+  delivered: boolean;
+  whatsappUrl?: string;
 };
 
 type RecentTicket = {
@@ -37,6 +42,9 @@ type RecentTicket = {
   total: number;
   email: string | null;
   emailed: boolean;
+  phone: string | null;
+  channel: "email" | "whatsapp";
+  delivered: boolean;
   storeName: string;
   ticketText: string;
 };
@@ -55,7 +63,9 @@ export function TicketPage() {
   const barcodeRef = useRef("");
   const lastKeyAt = useRef(0);
   const sealTimer = useRef<number | null>(null);
+  const [channel, setChannel] = useState<"email" | "whatsapp" | null>(null);
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [ticket, setTicket] = useState<CommitResult | null>(null);
   const [recent, setRecent] = useState<RecentTicket[]>([]);
@@ -64,6 +74,10 @@ export function TicketPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"scan" | "send" | null>(null);
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const phoneDigits = phone.replace(/\D/g, "");
+  const phoneOk = phoneDigits.length >= 10 && phoneDigits.length <= 15;
+  const deliveryOk =
+    channel === "email" ? emailOk : channel === "whatsapp" ? phoneOk : false;
 
   const activeStoreId = isAdmin ? storeId : store?.id ?? "";
 
@@ -194,7 +208,7 @@ export function TicketPage() {
   }
 
   async function closeSale() {
-    if (!preview || barcodes.length === 0 || busy || !emailOk) return;
+    if (!preview || barcodes.length === 0 || busy || !channel || !deliveryOk) return;
     setBusy("send");
     setError(null);
     try {
@@ -206,7 +220,9 @@ export function TicketPage() {
           saleType,
           paymentMethod: payment,
           barcodes,
-          email: email.trim(),
+          deliveryChannel: channel,
+          email: channel === "email" ? email.trim() : undefined,
+          phone: channel === "whatsapp" ? phone.trim() : undefined,
         }),
       });
       setTicket(result);
@@ -364,23 +380,91 @@ export function TicketPage() {
             {preview.discountTotal.toFixed(2)} · Total ${preview.total.toFixed(2)}
           </p>
         )}
-        <div className="form-row" style={{ marginTop: "0.85rem" }}>
-          <label>Correo del cliente</label>
-          <input
-            type="email"
-            value={email}
-            placeholder="correo del cliente"
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </div>
-        <button
-          className="btn"
-          type="button"
-          disabled={!preview || busy !== null || !emailOk}
-          onClick={() => void closeSale()}
-        >
-          {busy === "send" ? "Enviando…" : "Enviar ticket por correo y cerrar venta"}
-        </button>
+        {!channel ? (
+          <div className="form-row" style={{ marginTop: "0.85rem" }}>
+            <label>Enviar ticket por</label>
+            <div className="form-inline">
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setChannel("email")}
+              >
+                Correo
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => setChannel("whatsapp")}
+              >
+                WhatsApp
+              </button>
+            </div>
+          </div>
+        ) : channel === "email" ? (
+          <>
+            <div className="form-row" style={{ marginTop: "0.85rem" }}>
+              <label>Correo del cliente</label>
+              <input
+                type="email"
+                value={email}
+                placeholder="correo del cliente"
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </div>
+            <div className="form-inline">
+              <button
+                className="btn"
+                type="button"
+                disabled={!preview || busy !== null || !deliveryOk}
+                onClick={() => void closeSale()}
+              >
+                {busy === "send"
+                  ? "Enviando…"
+                  : "Enviar ticket por correo y cerrar venta"}
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy !== null}
+                onClick={() => setChannel(null)}
+              >
+                Regresar
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="form-row" style={{ marginTop: "0.85rem" }}>
+              <label>WhatsApp del cliente</label>
+              <input
+                type="tel"
+                value={phone}
+                placeholder="10 dígitos"
+                onChange={(event) => setPhone(event.target.value)}
+              />
+            </div>
+            <div className="form-inline">
+              <button
+                className="btn"
+                type="button"
+                disabled={!preview || busy !== null || !deliveryOk}
+                onClick={() => void closeSale()}
+              >
+                {busy === "send"
+                  ? "Enviando…"
+                  : "Enviar ticket por WhatsApp y cerrar venta"}
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                disabled={busy !== null}
+                onClick={() => setChannel(null)}
+              >
+                Regresar
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {ticket && (
@@ -389,10 +473,31 @@ export function TicketPage() {
             Venta {ticket.sale.folio}
           </h2>
           <p className="page-sub">
-            {ticket.emailed
-              ? `Recibo enviado a ${ticket.email}. Total $${ticket.sale.total.toFixed(2)}.`
-              : `La venta quedó cerrada, pero el recibo no se envió a ${ticket.email}. Total $${ticket.sale.total.toFixed(2)}.`}
+            {ticket.channel === "whatsapp"
+              ? ticket.delivered
+                ? `Recibo enviado por WhatsApp a ${ticket.destination}. Total $${ticket.sale.total.toFixed(2)}.`
+                : `Venta cerrada. Abre WhatsApp para enviar el ticket a ${ticket.destination}. Total $${ticket.sale.total.toFixed(2)}.`
+              : ticket.emailed
+                ? `Recibo enviado a ${ticket.destination}. Total $${ticket.sale.total.toFixed(2)}.`
+                : `La venta quedó cerrada, pero el recibo no se envió a ${ticket.destination}. Total $${ticket.sale.total.toFixed(2)}.`}
           </p>
+          {ticket.whatsappUrl && (
+            <p style={{ margin: "0 0 0.75rem" }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => {
+                  if (import.meta.env.TAURI_ENV_PLATFORM) {
+                    void openExternal(ticket.whatsappUrl!);
+                  } else {
+                    window.open(ticket.whatsappUrl, "_blank");
+                  }
+                }}
+              >
+                Abrir WhatsApp
+              </button>
+            </p>
+          )}
           <pre className="ticket-preview">{ticket.ticketText}</pre>
         </div>
       )}
@@ -411,12 +516,10 @@ export function TicketPage() {
                   <strong>{item.folio}</strong>
                   <p className="page-sub" style={{ margin: "0.15rem 0 0" }}>
                     {new Date(item.createdAt).toLocaleString("es-MX")} · $
-                    {item.total.toFixed(2)} · {item.email ?? "Sin correo"}
-                    {item.email
-                      ? item.emailed
-                        ? " · enviado"
-                        : " · no salió por correo"
-                      : ""}
+                    {item.total.toFixed(2)} ·{" "}
+                    {item.channel === "whatsapp"
+                      ? `WhatsApp ${item.phone ?? ""}${item.delivered ? " · enviado" : " · pendiente en WhatsApp"}`
+                      : `${item.email ?? "Sin correo"}${item.email ? (item.emailed ? " · enviado" : " · no salió por correo") : ""}`}
                   </p>
                 </div>
                 <button

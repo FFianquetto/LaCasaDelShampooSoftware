@@ -8,6 +8,7 @@ import {
   upsertPriceSchema,
   createUserSchema,
   createPromotionSchema,
+  commitSaleBaseSchema,
   commitSaleSchema,
   reportQuerySchema,
   UserRole,
@@ -332,8 +333,8 @@ apiRouter.get("/sales/recent", requireAuth, (req: AuthedRequest, res, next) => {
 
 apiRouter.post("/sales/preview", requireAuth, (req, res, next) => {
   try {
-    const body = commitSaleSchema
-      .omit({ printTicket: true, email: true })
+    const body = commitSaleBaseSchema
+      .omit({ printTicket: true, email: true, phone: true, deliveryChannel: true })
       .parse(req.body);
     const session = req as AuthedRequest;
     if (session.user?.role === UserRole.Empleado) {

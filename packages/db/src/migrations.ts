@@ -284,6 +284,12 @@ export const MIGRATION_012 = `
 ALTER TABLE users ADD COLUMN phone TEXT;
 `;
 
+export const MIGRATION_013 = `
+ALTER TABLE sales ADD COLUMN ticket_phone TEXT;
+ALTER TABLE sales ADD COLUMN ticket_channel TEXT;
+ALTER TABLE sales ADD COLUMN ticket_whatsapped INTEGER NOT NULL DEFAULT 0;
+`;
+
 export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 1, name: "001_initial_schema", sql: MIGRATION_001 },
   { id: 2, name: "002_excel_categories_brand_cost", sql: MIGRATION_002 },
@@ -297,4 +303,5 @@ export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 10, name: "010_sale_ticket_email", sql: MIGRATION_010 },
   { id: 11, name: "011_customer_email", sql: MIGRATION_011 },
   { id: 12, name: "012_user_phone", sql: MIGRATION_012 },
+  { id: 13, name: "013_sale_ticket_whatsapp", sql: MIGRATION_013 },
 ];

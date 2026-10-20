@@ -10,7 +10,11 @@ import { AppError, assertFound } from "../errors.js";
 import { mapPromotion, mapSale, mapSaleItem } from "../mappers.js";
 import { resolvePrice } from "./catalog.js";
 import { formatTicket } from "./print.js";
-import { deliverTicket, type TicketData } from "./ticket-delivery.js";
+import {
+  deliverTicketDelivery,
+  normalizePhone,
+  type TicketData,
+} from "./ticket-delivery.js";
 
 function activePromotions(db: Db, productId: string): Promotion[] {
   const now = nowIso();
@@ -175,7 +179,7 @@ function takeUnit(
 
 export function previewSale(
   db: Db,
-  input: Omit<CommitSaleInput, "printTicket" | "email">,
+  input: Omit<CommitSaleInput, "printTicket" | "email" | "phone" | "deliveryChannel">,
 ): { lines: ResolvedCartLine[]; subtotal: number; discountTotal: number; total: number } {
   const units = resolveScans(db, input.barcodes, input.storeId);
   const counts = new Map<string, number>();
@@ -252,6 +256,10 @@ export async function commitSale(
   ticketText: string;
   emailed: boolean;
   email: string;
+  channel: "email" | "whatsapp";
+  destination: string;
+  delivered: boolean;
+  whatsappUrl?: string;
 }> {
   if (input.customerId) {
     const customer = assertFound(
@@ -298,6 +306,10 @@ export async function commitSale(
       )?.name ?? null
     : null;
 
+  const channel = input.deliveryChannel ?? "email";
+  const email = channel === "email" ? (input.email ?? "").trim() : "";
+  const phone = channel === "whatsapp" ? normalizePhone(input.phone ?? "") : "";
+
   const ticketData: TicketData = {
     storeName: String(store.name),
     storeCode: String(store.code),
@@ -308,7 +320,8 @@ export async function commitSale(
     saleType: input.saleType,
     customerCategory: input.customerCategory,
     paymentMethod: input.paymentMethod ?? null,
-    email: input.email,
+    email: email || null,
+    phone: phone || null,
     lines: preview.lines.map((l) => ({
       name: l.productName,
       barcode: l.barcode,
@@ -319,12 +332,16 @@ export async function commitSale(
     total: preview.total,
   };
 
-  const delivered = await deliverTicket(ticketData, input.email);
+  const delivered = await deliverTicketDelivery(ticketData, {
+    channel,
+    email,
+    phone,
+  });
   if (!delivered.ok) {
     throw new AppError(
       `No se pudo enviar el ticket: ${delivered.error}. La venta no se cerró.`,
       502,
-      "EMAIL_FAILED",
+      channel === "whatsapp" ? "WHATSAPP_FAILED" : "EMAIL_FAILED",
     );
   }
   const ticketText = delivered.text;
@@ -360,8 +377,8 @@ export async function commitSale(
       `INSERT INTO sales
        (id, folio, store_id, user_id, customer_id, sale_type, customer_category,
         payment_method, subtotal, discount_total, total, ticket_printed,
-        ticket_email, ticket_emailed, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+        ticket_email, ticket_emailed, ticket_phone, ticket_channel, ticket_whatsapped, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
     ).run(
       saleId,
       folio,
@@ -374,8 +391,11 @@ export async function commitSale(
       preview.subtotal,
       preview.discountTotal,
       preview.total,
-      input.email,
-      delivered.emailed ? 1 : 0,
+      email || null,
+      channel === "email" && delivered.sent ? 1 : 0,
+      phone || null,
+      channel,
+      channel === "whatsapp" && delivered.sent ? 1 : 0,
       createdAt,
     );
 
@@ -428,8 +448,12 @@ export async function commitSale(
     sale,
     items,
     ticketText,
-    emailed: delivered.emailed,
-    email: input.email,
+    emailed: channel === "email" && delivered.sent,
+    email,
+    channel,
+    destination: delivered.destination,
+    delivered: delivered.sent,
+    whatsappUrl: delivered.whatsappUrl,
   };
 }
 
@@ -439,6 +463,9 @@ export type RecentTicket = {
   total: number;
   email: string | null;
   emailed: boolean;
+  phone: string | null;
+  channel: "email" | "whatsapp";
+  delivered: boolean;
   storeName: string;
   ticketText: string;
 };
@@ -451,7 +478,7 @@ export function listRecentTickets(
   const sales = db
     .prepare(
       `SELECT s.id, s.folio, s.created_at, s.subtotal, s.discount_total, s.total,
-              s.ticket_email, s.ticket_emailed,
+              s.ticket_email, s.ticket_emailed, s.ticket_phone, s.ticket_channel, s.ticket_whatsapped,
               s.sale_type, s.customer_category, s.payment_method,
               st.name AS store_name, st.code AS store_code,
               u.full_name AS employee,
@@ -478,12 +505,22 @@ export function listRecentTickets(
       final_price: number;
     }[];
     const email = row.ticket_email == null ? null : String(row.ticket_email);
+    const phone = row.ticket_phone == null ? null : String(row.ticket_phone);
+    const channel: "email" | "whatsapp" =
+      row.ticket_channel === "whatsapp" ? "whatsapp" : "email";
+    const emailed = Number(row.ticket_emailed) === 1;
     return {
       folio: String(row.folio),
       createdAt: String(row.created_at),
       total: Number(row.total),
       email,
-      emailed: Number(row.ticket_emailed) === 1,
+      emailed,
+      phone,
+      channel,
+      delivered:
+        channel === "whatsapp"
+          ? Number(row.ticket_whatsapped) === 1
+          : emailed,
       storeName: String(row.store_name),
       ticketText: formatTicket({
         storeName: String(row.store_name),
@@ -497,6 +534,7 @@ export function listRecentTickets(
         paymentMethod:
           row.payment_method == null ? null : String(row.payment_method),
         email,
+        phone,
         lines: items.map((item) => ({
           name: item.product_name,
           barcode: item.barcode,

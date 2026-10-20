@@ -104,3 +104,22 @@ export function mailSettings(): {
   if (!host || !user || !pass || !from) return null;
   return { host, port, user, pass, from };
 }
+
+export function whatsappSettings(): {
+  token: string;
+  phoneNumberId: string;
+  templateName: string;
+  templateLang: string;
+  apiVersion: string;
+} | null {
+  const token = envValue("LCDS_WHATSAPP_TOKEN");
+  const phoneNumberId = envValue("LCDS_WHATSAPP_PHONE_NUMBER_ID");
+  if (!token || !phoneNumberId) return null;
+  return {
+    token,
+    phoneNumberId,
+    templateName: envValue("LCDS_WHATSAPP_TEMPLATE"),
+    templateLang: envValue("LCDS_WHATSAPP_TEMPLATE_LANG") || "es_MX",
+    apiVersion: envValue("LCDS_WHATSAPP_API_VERSION") || "v21.0",
+  };
+}

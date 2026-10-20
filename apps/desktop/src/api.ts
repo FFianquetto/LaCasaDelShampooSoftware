@@ -15,23 +15,37 @@ export class ApiError extends Error {
 }
 
 function getToken(): string | null {
-  return localStorage.getItem("lcds_token");
+  try {
+    return sessionStorage.getItem("lcds_token");
+  } catch {
+    return null;
+  }
 }
 
 export function setSession(session: Session | null): void {
-  if (!session) {
+  // sessionStorage: recargar la ventana conserva la sesión;
+  // cerrar la app la borra y al abrir pide login otra vez.
+  try {
     localStorage.removeItem("lcds_token");
     localStorage.removeItem("lcds_session");
-    return;
+    if (!session) {
+      sessionStorage.removeItem("lcds_token");
+      sessionStorage.removeItem("lcds_session");
+      return;
+    }
+    sessionStorage.setItem("lcds_token", session.token);
+    sessionStorage.setItem("lcds_session", JSON.stringify(session));
+  } catch {
+    // sin almacenamiento disponible
   }
-  localStorage.setItem("lcds_token", session.token);
-  localStorage.setItem("lcds_session", JSON.stringify(session));
 }
 
 export function loadStoredSession(): Session | null {
-  const raw = localStorage.getItem("lcds_session");
-  if (!raw) return null;
   try {
+    localStorage.removeItem("lcds_token");
+    localStorage.removeItem("lcds_session");
+    const raw = sessionStorage.getItem("lcds_session");
+    if (!raw) return null;
     return JSON.parse(raw) as Session;
   } catch {
     return null;

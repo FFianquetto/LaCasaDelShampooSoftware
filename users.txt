@@ -1,0 +1,4 @@
+admin / Admin#12
+usuario / Venta#01 - Americas
+usuario1 / Venta#02 - Henequen
+usuario2 / Venta#03 - Chihuahua

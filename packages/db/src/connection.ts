@@ -90,6 +90,13 @@ export function migrate(db: Db): void {
         continue;
       }
 
+      if (migration.id === 13 && tableHasColumn(db, "sales", "ticket_phone")) {
+        db.prepare(
+          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+        ).run(migration.id, migration.name);
+        continue;
+      }
+
       if (migration.id === 12 && tableHasColumn(db, "users", "phone")) {
         db.prepare(
           "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",

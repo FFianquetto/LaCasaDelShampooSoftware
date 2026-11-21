@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 const db = new Database("data/lacasadelshampoo.db");
 const now = new Date().toISOString();
 
-const adminHash = bcrypt.hashSync("Admin#12", 10);
+const adminHash = bcrypt.hashSync("Admin#123456", 10);
 const userHash = bcrypt.hashSync("Venta#01", 10);
 
 const store = db.prepare("SELECT id FROM stores WHERE code = 'AME'").get();
@@ -76,7 +76,7 @@ const rows = db
 console.table(rows);
 
 const okAdmin = bcrypt.compareSync(
-  "Admin#12",
+  "Admin#123456",
   db.prepare("SELECT password_hash AS h FROM users WHERE username = 'admin'").get().h,
 );
 const okUser = bcrypt.compareSync(

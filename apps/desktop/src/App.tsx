@@ -7,12 +7,16 @@ import { CustomersPage } from "./pages/CustomersPage";
 import { PricesPage } from "./pages/PricesPage";
 import { UsersPage } from "./pages/UsersPage";
 import { ReportsPage } from "./pages/ReportsPage";
+import { CashCutPage } from "./pages/CashCutPage";
+import { SalesHistoryPage } from "./pages/SalesHistoryPage";
+import { StockAlertModal } from "./StockAlertModal";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const { user, store, logout, isAdmin } = useAuth();
   const storeLabel = store?.name.replace("La Casa del Shampoo — ", "");
   return (
     <div className="app-shell">
+      {isAdmin && <StockAlertModal />}
       <aside className="sidebar">
         <div className="brand">
           La Casa del Shampoo
@@ -27,17 +31,21 @@ function Shell({ children }: { children: React.ReactNode }) {
               <NavLink to="/ticket">Ticket</NavLink>
               <NavLink to="/clientes">Clientes</NavLink>
               <NavLink to="/precios">Precios</NavLink>
-              <NavLink to="/empleados">Empleados</NavLink>
+              <NavLink to="/empleados">Cuentas / empleados</NavLink>
+              <NavLink to="/corte">Corte de caja</NavLink>
+              <NavLink to="/historial">Historial</NavLink>
+              <NavLink to="/reportes">Reportes</NavLink>
               <span className="nav-disabled" title="Inhabilitado por ahora">
                 Sync multi-tienda
               </span>
-              <NavLink to="/reportes">Reportes</NavLink>
             </>
           ) : (
             <>
               <NavLink to="/ticket">Ticket</NavLink>
               <NavLink to="/pos">Inventario</NavLink>
               <NavLink to="/clientes">Clientes</NavLink>
+              <NavLink to="/corte">Corte de caja</NavLink>
+              <NavLink to="/historial">Historial</NavLink>
             </>
           )}
         </nav>
@@ -112,6 +120,22 @@ export function App() {
         element={
           <Private>
             <CustomersPage />
+          </Private>
+        }
+      />
+      <Route
+        path="/corte"
+        element={
+          <Private>
+            <CashCutPage />
+          </Private>
+        }
+      />
+      <Route
+        path="/historial"
+        element={
+          <Private>
+            <SalesHistoryPage />
           </Private>
         }
       />

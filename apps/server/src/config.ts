@@ -105,6 +105,13 @@ export function mailSettings(): {
   return { host, port, user, pass, from };
 }
 
+export const DEFAULT_HQ_EMAIL = "lacasadelshampoo.torres@gmail.com";
+
+/** Correo de oficina central que recibe el aviso de ventas marcadas. */
+export function hqEmailSettings(): { to: string } {
+  return { to: envValue("LCDS_HQ_EMAIL") || DEFAULT_HQ_EMAIL };
+}
+
 export function whatsappSettings(): {
   token: string;
   phoneNumberId: string;

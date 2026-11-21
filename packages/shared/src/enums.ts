@@ -32,8 +32,31 @@ export const PaymentMethod = {
   Efectivo: "Efectivo",
   Tarjeta: "Tarjeta",
   Transferencia: "Transferencia",
+  Saldo: "Saldo",
 } as const;
 export type PaymentMethod = (typeof PaymentMethod)[keyof typeof PaymentMethod];
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  Efectivo: "Efectivo",
+  Tarjeta: "Tarjeta",
+  Transferencia: "Transferencia",
+  Saldo: "Saldo / crédito",
+};
+
+export const CashMovementType = {
+  Entrada: "Entrada",
+  Salida: "Salida",
+  Retiro: "Retiro",
+  Fondo: "Fondo",
+} as const;
+export type CashMovementType =
+  (typeof CashMovementType)[keyof typeof CashMovementType];
+
+export const CashCutStatus = {
+  Abierto: "Abierto",
+  Cerrado: "Cerrado",
+} as const;
+export type CashCutStatus = (typeof CashCutStatus)[keyof typeof CashCutStatus];
 
 export const PromotionType = {
   PercentOff: "PercentOff",
@@ -54,8 +77,16 @@ export const paymentMethodSchema = z.enum([
   "Efectivo",
   "Tarjeta",
   "Transferencia",
+  "Saldo",
 ]);
 export const promotionTypeSchema = z.enum(["PercentOff", "BuyXGetY"]);
+export const cashMovementTypeSchema = z.enum([
+  "Entrada",
+  "Salida",
+  "Retiro",
+  "Fondo",
+]);
+export const cashCutStatusSchema = z.enum(["Abierto", "Cerrado"]);
 
 export const CUSTOMER_CATEGORY_LABELS: Record<CustomerCategory, string> = {
   Publico: "Local (Público)",

@@ -40,6 +40,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
+    try {
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.startsWith("lcds_stock_alert_seen_")) {
+          sessionStorage.removeItem(key);
+        }
+      }
+    } catch {
+      // ignore
+    }
     setSession(null);
     setSessionState(null);
   }, []);

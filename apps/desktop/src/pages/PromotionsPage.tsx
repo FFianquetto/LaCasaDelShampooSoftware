@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { Product, Promotion, PromotionType } from "@lcds/shared";
 import { api, ApiError } from "../api";
+import { DateInput } from "../DateInput";
 
 function localDateInput(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -154,19 +155,15 @@ export function PromotionsPage({ embedded = false }: { embedded?: boolean }) {
             </div>
             <div className="form-row" style={{ marginBottom: 0 }}>
               <label>Desde</label>
-              <input
-                type="date"
+              <DateInput
                 value={startsAt}
-                onChange={(e) => setStartsAt(e.target.value)}
+                onChange={setStartsAt}
+                aria-label="Desde"
               />
             </div>
             <div className="form-row" style={{ marginBottom: 0 }}>
               <label>Hasta</label>
-              <input
-                type="date"
-                value={endsAt}
-                onChange={(e) => setEndsAt(e.target.value)}
-              />
+              <DateInput value={endsAt} onChange={setEndsAt} aria-label="Hasta" />
             </div>
             <button className="btn" type="submit">
               Crear

@@ -19,6 +19,34 @@ export type ProductCategory =
 export const PRODUCT_CATEGORIES = Object.values(ProductCategory);
 
 /**
+ * Mínimo de piezas disponibles por producto, según categoría.
+ * Si el stock del producto baja de este número, el admin recibe alerta al entrar.
+ * Calibrado con el inventario real (promedios y giro típico por línea).
+ */
+export const CATEGORY_MIN_STOCK: Record<ProductCategory, number> = {
+  [ProductCategory.Shampoo]: 5,
+  [ProductCategory.Acondicionador]: 5,
+  [ProductCategory.Tratamiento]: 3,
+  [ProductCategory.Coloracion]: 2,
+  [ProductCategory.Fijacion]: 3,
+  [ProductCategory.Aceites]: 3,
+  [ProductCategory.Maquillaje]: 2,
+  [ProductCategory.CuidadoCorporal]: 3,
+  [ProductCategory.Salud]: 2,
+  [ProductCategory.Fragancias]: 2,
+  [ProductCategory.Accesorios]: 2,
+  [ProductCategory.Otros]: 3,
+};
+
+export function minStockForCategory(category: string | null | undefined): number {
+  if (!category) return CATEGORY_MIN_STOCK[ProductCategory.Otros];
+  if (category in CATEGORY_MIN_STOCK) {
+    return CATEGORY_MIN_STOCK[category as ProductCategory];
+  }
+  return CATEGORY_MIN_STOCK[ProductCategory.Otros];
+}
+
+/**
  * Clasifica un artículo por nombre + marca (Excel La Casa del Shampoo).
  */
 export function classifyProductCategory(

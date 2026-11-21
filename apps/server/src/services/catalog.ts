@@ -4,7 +4,10 @@ import type {
   CreateLotInput,
   CreateCustomerInput,
   UpdateCustomerRuleInput,
+  UpdateCustomerInput,
   UpsertPriceInput,
+  UpsertProductCostInput,
+  PriceCostHistory,
   CreateUserInput,
   CreatePromotionInput,
   Product,
@@ -222,6 +225,56 @@ export function updateProduct(
   );
 }
 
+/** Existencias del producto desglosadas por sucursal. */
+export function productStockByStore(
+  db: Db,
+  productId: string,
+  storeId?: string,
+): {
+  storeId: string;
+  storeCode: string;
+  storeName: string;
+  disponible: number;
+  vendido: number;
+}[] {
+  assertFound(
+    db.prepare("SELECT id FROM products WHERE id = ?").get(productId),
+    "Producto no encontrado",
+  );
+  const clauses = ["1 = 1"];
+  const params: unknown[] = [productId];
+  if (storeId) {
+    clauses.push("st.id = ?");
+    params.push(storeId);
+  }
+  return (
+    db
+      .prepare(
+        `SELECT st.id AS store_id, st.code AS store_code, st.name AS store_name,
+                IFNULL(SUM(CASE WHEN l.status = 'Disponible' THEN 1 ELSE 0 END), 0) AS disponible,
+                IFNULL(SUM(CASE WHEN l.status = 'Vendido' THEN 1 ELSE 0 END), 0) AS vendido
+         FROM stores st
+         LEFT JOIN lots l ON l.store_id = st.id AND l.product_id = ?
+         WHERE ${clauses.join(" AND ")}
+         GROUP BY st.id
+         ORDER BY st.code`,
+      )
+      .all(...params) as {
+      store_id: string;
+      store_code: string;
+      store_name: string;
+      disponible: number;
+      vendido: number;
+    }[]
+  ).map((row) => ({
+    storeId: row.store_id,
+    storeCode: row.store_code,
+    storeName: row.store_name,
+    disponible: Number(row.disponible),
+    vendido: Number(row.vendido),
+  }));
+}
+
 export function listLots(
   db: Db,
   filters: { storeId?: string; status?: string; q?: string },
@@ -322,19 +375,55 @@ function daysBetween(fromIso: string, to: Date): number {
   return Math.round((mexicoDay(to) - mexicoDay(fromIso)) / 86_400_000);
 }
 
+/** Misma lógica que productos (P0001): secuencia única C0001, C0002… */
 function nextClientNumber(db: Db): string {
   const rows = db
     .prepare(
       `SELECT client_number FROM customers
-       WHERE client_number GLOB 'D-[0-9]*'`,
+       WHERE client_number GLOB 'C[0-9]*'`,
     )
     .all() as { client_number: string }[];
   let max = 0;
   for (const row of rows) {
-    const value = Number(row.client_number.slice(2));
+    const value = Number(row.client_number.slice(1));
     if (Number.isInteger(value)) max = Math.max(max, value);
   }
-  return `D-${String(max + 1).padStart(4, "0")}`;
+  return `C${String(max + 1).padStart(4, "0")}`;
+}
+
+function attachTotalSpent(db: Db, customers: Customer[]): Customer[] {
+  if (customers.length === 0) return customers;
+  const spentStmt = db.prepare(
+    `SELECT COALESCE(SUM(s.total), 0) AS total
+     FROM sales s
+     WHERE s.ticket_printed = 1
+       AND (
+         s.customer_id = ?
+         OR (
+           ? IS NOT NULL AND ? != ''
+           AND lower(IFNULL(s.ticket_email, '')) = lower(?)
+         )
+       )`,
+  );
+  return customers.map((customer) => {
+    const email = customer.email?.trim() || null;
+    const row = spentStmt.get(
+      customer.id,
+      email,
+      email ?? "",
+      email ?? "",
+    ) as { total: number };
+    return {
+      ...customer,
+      totalSpent: money(row.total),
+    };
+  });
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function money(value: number): number {
+  return Math.round(Number(value) * 100) / 100;
 }
 
 function assertClientNumberFree(db: Db, clientNumber: string, exceptId?: string) {
@@ -354,7 +443,8 @@ function frequencyFor(
     | undefined,
   now: Date,
 ): CustomerFrequency | null {
-  if (!isDistributorCategory(customer.category)) return null;
+  const distributor = isDistributorCategory(customer.category);
+  if (!distributor && customer.purchaseEveryDays == null) return null;
   const salesCount = stats?.sales_count ?? 0;
   const lastPurchaseAt = stats?.last_purchase_at ?? null;
   const avgDaysBetween =
@@ -370,20 +460,34 @@ function frequencyFor(
     return {
       salesCount,
       lastPurchaseAt,
+      nextPurchaseAt: null,
       avgDaysBetween,
       daysSinceAnchor: null,
+      daysOverdue: null,
       status: "sin_regla",
     };
   }
 
+  const every = customer.purchaseEveryDays;
   const anchor = lastPurchaseAt ?? customer.createdAt;
   const daysSinceAnchor = Math.max(0, daysBetween(anchor, now));
+  const nextPurchaseAt = new Date(
+    new Date(anchor).getTime() + every * 86_400_000,
+  ).toISOString();
+  const status: CustomerFrequency["status"] =
+    daysSinceAnchor <= every * 0.8
+      ? "al_dia"
+      : daysSinceAnchor <= every
+        ? "proximo"
+        : "atrasado";
   return {
     salesCount,
     lastPurchaseAt,
+    nextPurchaseAt,
     avgDaysBetween,
     daysSinceAnchor,
-    status: daysSinceAnchor <= customer.purchaseEveryDays ? "al_dia" : "atrasado",
+    daysOverdue: Math.max(0, daysSinceAnchor - every),
+    status,
   };
 }
 
@@ -391,21 +495,23 @@ export function listCustomers(
   db: Db,
   storeId?: string,
   withFrequency = false,
+  includeInactive = false,
 ): Customer[] {
+  const activeClause = includeInactive ? "1 = 1" : "active = 1";
   const rows = storeId
     ? (db
         .prepare(
           `SELECT * FROM customers
-           WHERE active = 1 AND (store_id = ? OR store_id IS NULL)
+           WHERE ${activeClause} AND (store_id = ? OR store_id IS NULL)
            ORDER BY name`,
         )
         .all(storeId) as Record<string, unknown>[])
     : (db
         .prepare(
-          "SELECT * FROM customers WHERE active = 1 ORDER BY name",
+          `SELECT * FROM customers WHERE ${activeClause} ORDER BY name`,
         )
         .all() as Record<string, unknown>[]);
-  const customers = rows.map(mapCustomer);
+  const customers = attachTotalSpent(db, rows.map(mapCustomer));
   if (!withFrequency) return customers;
 
   const stats = db
@@ -440,77 +546,375 @@ export function createCustomer(
     "Sucursal no encontrada",
   );
   const distributor = isDistributorCategory(input.category);
-  const clientNumber = distributor
-    ? (input.clientNumber?.trim() || nextClientNumber(db))
-    : null;
-  const purchaseEveryDays = distributor
-    ? (input.purchaseEveryDays ?? DEFAULT_PURCHASE_EVERY_DAYS)
-    : null;
-  if (clientNumber) assertClientNumberFree(db, clientNumber);
+  const clientNumber = input.clientNumber?.trim() || nextClientNumber(db);
+  const purchaseEveryDays =
+    input.purchaseEveryDays ??
+    (distributor ? DEFAULT_PURCHASE_EVERY_DAYS : null);
+  assertClientNumberFree(db, clientNumber);
 
   const phone = input.phone?.trim() || null;
   const email = input.email?.trim() || null;
   if (!phone && !email) {
     throw new AppError("Escribe el teléfono o el correo. Con uno basta.", 400);
   }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (email && !EMAIL_RE.test(email)) {
     throw new AppError("El correo no es válido", 400);
   }
+  const address = input.address?.trim() || null;
+  const branchName = input.branchName?.trim() || null;
 
   const id = newId("cus");
   db.prepare(
     `INSERT INTO customers
-     (id, name, category, phone, email, store_id, client_number, purchase_every_days, active, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+     (id, name, category, phone, email, address, branch_name, store_id, client_number, purchase_every_days, active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
   ).run(
     id,
     input.name,
     input.category,
     phone,
     email,
+    address,
+    branchName,
     input.storeId,
     clientNumber,
     purchaseEveryDays,
     nowIso(),
   );
-  return mapCustomer(
-    db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Record<
-      string,
-      unknown
-    >,
-  );
+  return attachTotalSpent(db, [
+    mapCustomer(
+      db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Record<
+        string,
+        unknown
+      >,
+    ),
+  ])[0];
 }
 
+/** Edita datos del cliente sin tocar su historial de ventas. */
+export function updateCustomer(
+  db: Db,
+  id: string,
+  input: UpdateCustomerInput,
+): Customer {
+  const current = assertFound(
+    db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as
+      | Record<string, unknown>
+      | undefined,
+    "Cliente no encontrado",
+  );
+  const before = mapCustomer(current);
+
+  const name = input.name !== undefined ? input.name.trim() : before.name;
+  if (!name) throw new AppError("Escribe el nombre del cliente", 400);
+
+  const category = input.category ?? before.category;
+  const categoryChanged = category !== before.category;
+
+  const phone =
+    input.phone !== undefined ? input.phone?.trim() || null : before.phone;
+  const email =
+    input.email !== undefined ? input.email?.trim() || null : before.email;
+  if (email && !EMAIL_RE.test(email)) {
+    throw new AppError("El correo no es válido", 400);
+  }
+  if (
+    (input.phone !== undefined || input.email !== undefined) &&
+    !phone &&
+    !email
+  ) {
+    throw new AppError("Deja al menos el teléfono o el correo", 400);
+  }
+
+  const address =
+    input.address !== undefined
+      ? input.address?.trim() || null
+      : before.address;
+  const branchName =
+    input.branchName !== undefined
+      ? input.branchName?.trim() || null
+      : before.branchName;
+
+  let storeId = before.storeId;
+  if (input.storeId !== undefined) {
+    if (input.storeId !== null) {
+      assertFound(
+        db.prepare("SELECT id FROM stores WHERE id = ?").get(input.storeId),
+        "Sucursal no encontrada",
+      );
+    }
+    storeId = input.storeId;
+  }
+
+  let clientNumber = before.clientNumber;
+  if (input.clientNumber !== undefined) {
+    clientNumber = input.clientNumber.trim();
+  } else if (!clientNumber) {
+    clientNumber = nextClientNumber(db);
+  }
+  if (clientNumber !== before.clientNumber) {
+    assertClientNumberFree(db, clientNumber, id);
+  }
+
+  let purchaseEveryDays = before.purchaseEveryDays;
+  if (input.purchaseEveryDays !== undefined) {
+    purchaseEveryDays = input.purchaseEveryDays;
+  } else if (
+    categoryChanged &&
+    isDistributorCategory(category) &&
+    purchaseEveryDays == null
+  ) {
+    purchaseEveryDays = DEFAULT_PURCHASE_EVERY_DAYS;
+  }
+
+  const active = input.active ?? before.active;
+
+  db.prepare(
+    `UPDATE customers
+     SET name = ?, category = ?, phone = ?, email = ?, address = ?, branch_name = ?,
+         store_id = ?, client_number = ?, purchase_every_days = ?, active = ?
+     WHERE id = ?`,
+  ).run(
+    name,
+    category,
+    phone,
+    email,
+    address,
+    branchName,
+    storeId,
+    clientNumber,
+    purchaseEveryDays,
+    boolToInt(active),
+    id,
+  );
+
+  return attachTotalSpent(db, [
+    mapCustomer(
+      db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Record<
+        string,
+        unknown
+      >,
+    ),
+  ])[0];
+}
+
+/** Compatibilidad: redirige a updateCustomer. */
 export function updateCustomerRule(
   db: Db,
   id: string,
   input: UpdateCustomerRuleInput,
 ): Customer {
-  const current = assertFound(
-    db.prepare("SELECT * FROM customers WHERE id = ? AND active = 1").get(id) as
+  return updateCustomer(db, id, {
+    clientNumber: input.clientNumber,
+    purchaseEveryDays: input.purchaseEveryDays,
+  });
+}
+
+export type CustomerPurchaseAnalysis = {
+  customer: Customer;
+  summary: {
+    salesCount: number;
+    units: number;
+    revenue: number;
+    cost: number;
+    profit: number;
+    avgTicket: number;
+    firstPurchaseAt: string | null;
+    lastPurchaseAt: string | null;
+  };
+  products: {
+    productId: string;
+    code: string | null;
+    name: string;
+    brand: string | null;
+    category: string | null;
+    units: number;
+    revenue: number;
+    cost: number;
+    profit: number;
+  }[];
+  paymentMethods: {
+    paymentMethod: string;
+    salesCount: number;
+    revenue: number;
+  }[];
+  sales: {
+    id: string;
+    folio: string;
+    createdAt: string;
+    storeName: string;
+    employeeName: string;
+    saleType: string;
+    paymentMethod: string | null;
+    units: number;
+    total: number;
+  }[];
+};
+
+export function customerPurchaseAnalysis(
+  db: Db,
+  customerId: string,
+  filters: { storeId?: string; from?: string; to?: string } = {},
+): CustomerPurchaseAnalysis {
+  const row = assertFound(
+    db.prepare("SELECT * FROM customers WHERE id = ?").get(customerId) as
       | Record<string, unknown>
       | undefined,
     "Cliente no encontrado",
   );
-  const customer = mapCustomer(current);
-  if (!isDistributorCategory(customer.category)) {
-    throw new AppError(
-      "El número y la regla de compra solo aplican a distribuidoras",
-      400,
-    );
+  const customer = mapCustomer(row);
+
+  const clauses = ["s.customer_id = ?", "s.ticket_printed = 1"];
+  const params: unknown[] = [customerId];
+  if (filters.storeId) {
+    clauses.push("s.store_id = ?");
+    params.push(filters.storeId);
   }
-  assertClientNumberFree(db, input.clientNumber, id);
-  db.prepare(
-    `UPDATE customers
-     SET client_number = ?, purchase_every_days = ?
-     WHERE id = ?`,
-  ).run(input.clientNumber, input.purchaseEveryDays, id);
-  return mapCustomer(
-    db.prepare("SELECT * FROM customers WHERE id = ?").get(id) as Record<
-      string,
-      unknown
-    >,
+  if (filters.from) {
+    clauses.push("s.created_at >= ?");
+    params.push(filters.from);
+  }
+  if (filters.to) {
+    clauses.push("s.created_at <= ?");
+    params.push(filters.to);
+  }
+  const where = `WHERE ${clauses.join(" AND ")}`;
+
+  const productRows = db
+    .prepare(
+      `SELECT p.id AS product_id, p.code, p.name, p.brand, p.category,
+              COUNT(si.id) AS units,
+              COALESCE(SUM(si.final_price), 0) AS revenue,
+              COALESCE(SUM(COALESCE(si.unit_cost, p.cost, 0)), 0) AS cost
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       JOIN products p ON p.id = si.product_id
+       ${where}
+       GROUP BY p.id
+       ORDER BY revenue DESC, p.name COLLATE NOCASE`,
+    )
+    .all(...params) as {
+    product_id: string;
+    code: string | null;
+    name: string;
+    brand: string | null;
+    category: string | null;
+    units: number;
+    revenue: number;
+    cost: number;
+  }[];
+
+  const products = productRows.map((r) => ({
+    productId: r.product_id,
+    code: r.code,
+    name: r.name,
+    brand: r.brand,
+    category: r.category,
+    units: r.units,
+    revenue: money(r.revenue),
+    cost: money(r.cost),
+    profit: money(r.revenue - r.cost),
+  }));
+
+  const payRows = db
+    .prepare(
+      `SELECT IFNULL(s.payment_method, 'Sin definir') AS payment_method,
+              COUNT(*) AS sales_count,
+              COALESCE(SUM(s.total), 0) AS revenue
+       FROM sales s
+       ${where}
+       GROUP BY IFNULL(s.payment_method, 'Sin definir')
+       ORDER BY revenue DESC`,
+    )
+    .all(...params) as {
+    payment_method: string;
+    sales_count: number;
+    revenue: number;
+  }[];
+
+  const saleRows = db
+    .prepare(
+      `SELECT s.id, s.folio, s.created_at, s.sale_type, s.payment_method, s.total,
+              st.name AS store_name, u.full_name AS employee_name,
+              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.id) AS units
+       FROM sales s
+       JOIN stores st ON st.id = s.store_id
+       JOIN users u ON u.id = s.user_id
+       ${where}
+       ORDER BY s.created_at DESC
+       LIMIT 300`,
+    )
+    .all(...params) as Record<string, unknown>[];
+
+  const totals = db
+    .prepare(
+      `SELECT COUNT(*) AS sales_count,
+              COALESCE(SUM(s.total), 0) AS revenue,
+              MIN(s.created_at) AS first_at,
+              MAX(s.created_at) AS last_at
+       FROM sales s
+       ${where}`,
+    )
+    .get(...params) as {
+    sales_count: number;
+    revenue: number;
+    first_at: string | null;
+    last_at: string | null;
+  };
+
+  const units = products.reduce((acc, p) => acc + p.units, 0);
+  const cost = products.reduce((acc, p) => acc + p.cost, 0);
+  const revenue = money(totals.revenue);
+
+  const stats = db
+    .prepare(
+      `SELECT COUNT(*) AS sales_count,
+              MIN(created_at) AS first_purchase_at,
+              MAX(created_at) AS last_purchase_at
+       FROM sales WHERE ticket_printed = 1 AND customer_id = ?`,
+    )
+    .get(customerId) as
+    | { sales_count: number; first_purchase_at: string; last_purchase_at: string }
+    | undefined;
+  customer.frequency = frequencyFor(
+    customer,
+    stats && stats.sales_count > 0 ? stats : undefined,
+    new Date(),
   );
+
+  return {
+    customer,
+    summary: {
+      salesCount: totals.sales_count,
+      units,
+      revenue,
+      cost: money(cost),
+      // La utilidad se calcula sobre lo vendido con descuentos aplicados.
+      profit: money(products.reduce((acc, p) => acc + p.profit, 0)),
+      avgTicket: totals.sales_count
+        ? money(revenue / totals.sales_count)
+        : 0,
+      firstPurchaseAt: totals.first_at,
+      lastPurchaseAt: totals.last_at,
+    },
+    products,
+    paymentMethods: payRows.map((r) => ({
+      paymentMethod: r.payment_method,
+      salesCount: r.sales_count,
+      revenue: money(r.revenue),
+    })),
+    sales: saleRows.map((r) => ({
+      id: String(r.id),
+      folio: String(r.folio),
+      createdAt: String(r.created_at),
+      storeName: String(r.store_name),
+      employeeName: String(r.employee_name),
+      saleType: String(r.sale_type),
+      paymentMethod: r.payment_method == null ? null : String(r.payment_method),
+      units: Number(r.units),
+      total: money(Number(r.total)),
+    })),
+  };
 }
 
 export function listPrices(db: Db, productId?: string): PriceListItem[] {
@@ -525,7 +929,53 @@ export function listPrices(db: Db, productId?: string): PriceListItem[] {
   return rows.map(mapPrice);
 }
 
-export function upsertPrice(db: Db, input: UpsertPriceInput): PriceListItem {
+function todayLocalDate(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function insertPriceCostHistory(
+  db: Db,
+  row: {
+    productId: string;
+    kind: "cost" | "price";
+    customerCategory?: string | null;
+    saleType?: string | null;
+    previousValue: number | null;
+    newValue: number;
+    effectiveDate: string;
+    note?: string | null;
+    userId?: string | null;
+  },
+) {
+  db.prepare(
+    `INSERT INTO price_cost_history
+       (id, product_id, kind, customer_category, sale_type,
+        previous_value, new_value, effective_date, note, user_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    newId("pch"),
+    row.productId,
+    row.kind,
+    row.customerCategory ?? null,
+    row.saleType ?? null,
+    row.previousValue,
+    row.newValue,
+    row.effectiveDate,
+    row.note?.trim() || null,
+    row.userId ?? null,
+    nowIso(),
+  );
+}
+
+export function upsertPrice(
+  db: Db,
+  input: UpsertPriceInput,
+  userId?: string,
+): PriceListItem {
   assertFound(
     db.prepare("SELECT id FROM products WHERE id = ?").get(input.productId),
     "Producto no encontrado",
@@ -533,43 +983,272 @@ export function upsertPrice(db: Db, input: UpsertPriceInput): PriceListItem {
 
   const existing = db
     .prepare(
-      `SELECT id FROM price_list
+      `SELECT id, price FROM price_list
        WHERE product_id = ? AND customer_category = ? AND sale_type = ?`,
     )
     .get(input.productId, input.customerCategory, input.saleType) as
-    | { id: string }
+    | { id: string; price: number }
     | undefined;
 
+  const effectiveDate = input.effectiveDate || todayLocalDate();
+  const previous = existing ? Number(existing.price) : null;
+
+  let resultId: string;
   if (existing) {
     db.prepare("UPDATE price_list SET price = ? WHERE id = ?").run(
       input.price,
       existing.id,
     );
-    return mapPrice(
-      db.prepare("SELECT * FROM price_list WHERE id = ?").get(existing.id) as Record<
-        string,
-        unknown
-      >,
+    resultId = existing.id;
+  } else {
+    resultId = newId("prc");
+    db.prepare(
+      `INSERT INTO price_list (id, product_id, customer_category, sale_type, price)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      resultId,
+      input.productId,
+      input.customerCategory,
+      input.saleType,
+      input.price,
     );
   }
 
-  const id = newId("prc");
-  db.prepare(
-    `INSERT INTO price_list (id, product_id, customer_category, sale_type, price)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(
-    id,
-    input.productId,
-    input.customerCategory,
-    input.saleType,
-    input.price,
-  );
+  if (previous === null || previous !== input.price) {
+    insertPriceCostHistory(db, {
+      productId: input.productId,
+      kind: "price",
+      customerCategory: input.customerCategory,
+      saleType: input.saleType,
+      previousValue: previous,
+      newValue: input.price,
+      effectiveDate,
+      note: input.note,
+      userId,
+    });
+  }
+
   return mapPrice(
-    db.prepare("SELECT * FROM price_list WHERE id = ?").get(id) as Record<
+    db.prepare("SELECT * FROM price_list WHERE id = ?").get(resultId) as Record<
       string,
       unknown
     >,
   );
+}
+
+/** Actualiza el costo original del producto y deja historial por día. */
+export function upsertProductCost(
+  db: Db,
+  userId: string,
+  input: UpsertProductCostInput,
+): Product {
+  const current = assertFound(
+    db.prepare("SELECT * FROM products WHERE id = ?").get(input.productId) as
+      | Record<string, unknown>
+      | undefined,
+    "Producto no encontrado",
+  );
+  const previous =
+    current.cost == null || current.cost === ""
+      ? null
+      : Number(current.cost);
+  const effectiveDate = input.effectiveDate || todayLocalDate();
+
+  db.prepare("UPDATE products SET cost = ? WHERE id = ?").run(
+    input.cost,
+    input.productId,
+  );
+
+  if (previous === null || previous !== input.cost) {
+    insertPriceCostHistory(db, {
+      productId: input.productId,
+      kind: "cost",
+      previousValue: previous,
+      newValue: input.cost,
+      effectiveDate,
+      note: input.note,
+      userId,
+    });
+  }
+
+  return mapProduct(
+    db.prepare("SELECT * FROM products WHERE id = ?").get(input.productId) as Record<
+      string,
+      unknown
+    >,
+  );
+}
+
+export function listPriceCostHistory(
+  db: Db,
+  filters: {
+    productId?: string;
+    brand?: string;
+    from?: string;
+    to?: string;
+    kind?: "cost" | "price";
+    limit?: number;
+  } = {},
+): PriceCostHistory[] {
+  const clauses: string[] = ["1 = 1"];
+  const params: unknown[] = [];
+  if (filters.productId) {
+    clauses.push("h.product_id = ?");
+    params.push(filters.productId);
+  }
+  if (filters.brand) {
+    clauses.push("IFNULL(p.brand, '') = ?");
+    params.push(filters.brand);
+  }
+  if (filters.from) {
+    clauses.push("h.effective_date >= ?");
+    params.push(filters.from);
+  }
+  if (filters.to) {
+    clauses.push("h.effective_date <= ?");
+    params.push(filters.to);
+  }
+  if (filters.kind) {
+    clauses.push("h.kind = ?");
+    params.push(filters.kind);
+  }
+  const limit = Math.min(Math.max(filters.limit ?? 100, 1), 500);
+  params.push(limit);
+
+  return (
+    db
+      .prepare(
+        `SELECT h.*, p.code AS product_code, p.name AS product_name,
+                p.brand AS brand, u.full_name AS employee_name
+         FROM price_cost_history h
+         JOIN products p ON p.id = h.product_id
+         LEFT JOIN users u ON u.id = h.user_id
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY h.effective_date DESC, h.created_at DESC
+         LIMIT ?`,
+      )
+      .all(...params) as Record<string, unknown>[]
+  ).map((row) => ({
+    id: String(row.id),
+    productId: String(row.product_id),
+    productCode: row.product_code == null ? null : String(row.product_code),
+    productName: String(row.product_name),
+    brand: row.brand == null ? null : String(row.brand),
+    kind: row.kind as "cost" | "price",
+    customerCategory:
+      row.customer_category == null
+        ? null
+        : (String(row.customer_category) as CustomerCategory),
+    saleType:
+      row.sale_type == null ? null : (String(row.sale_type) as SaleType),
+    previousValue:
+      row.previous_value == null ? null : Number(row.previous_value),
+    newValue: Number(row.new_value),
+    effectiveDate: String(row.effective_date),
+    note: row.note == null ? null : String(row.note),
+    employeeName:
+      row.employee_name == null ? null : String(row.employee_name),
+    createdAt: String(row.created_at),
+  }));
+}
+
+/** Matriz de precios + costo + margen; general o filtrada por marca. */
+export function pricesOverview(
+  db: Db,
+  filters: { brand?: string; q?: string } = {},
+): {
+  brands: string[];
+  products: {
+    id: string;
+    code: string | null;
+    name: string;
+    brand: string | null;
+    category: string | null;
+    cost: number | null;
+    prices: {
+      customerCategory: CustomerCategory;
+      saleType: SaleType;
+      price: number;
+      margin: number | null;
+    }[];
+  }[];
+} {
+  const brands = (
+    db
+      .prepare(
+        `SELECT DISTINCT brand FROM products
+         WHERE active = 1 AND brand IS NOT NULL AND brand != ''
+         ORDER BY brand COLLATE NOCASE`,
+      )
+      .all() as { brand: string }[]
+  ).map((row) => row.brand);
+
+  const clauses = ["p.active = 1"];
+  const params: unknown[] = [];
+  if (filters.brand) {
+    clauses.push("IFNULL(p.brand, '') = ?");
+    params.push(filters.brand);
+  }
+  if (filters.q?.trim()) {
+    const term = `%${filters.q.trim()}%`;
+    clauses.push(
+      "(p.name LIKE ? OR p.brand LIKE ? OR p.code LIKE ? OR p.sku LIKE ?)",
+    );
+    params.push(term, term, term, term);
+  }
+
+  const products = (
+    db
+      .prepare(
+        `SELECT id, code, name, brand, category, cost
+         FROM products p
+         WHERE ${clauses.join(" AND ")}
+         ORDER BY IFNULL(brand, '') COLLATE NOCASE, code, name COLLATE NOCASE
+         LIMIT 500`,
+      )
+      .all(...params) as {
+      id: string;
+      code: string | null;
+      name: string;
+      brand: string | null;
+      category: string | null;
+      cost: number | null;
+    }[]
+  ).map((product) => {
+    const cost = product.cost == null ? null : Number(product.cost);
+    const prices = (
+      db
+        .prepare(
+          `SELECT customer_category, sale_type, price
+           FROM price_list WHERE product_id = ?
+           ORDER BY customer_category, sale_type`,
+        )
+        .all(product.id) as {
+        customer_category: CustomerCategory;
+        sale_type: SaleType;
+        price: number;
+      }[]
+    ).map((row) => {
+      const price = Number(row.price);
+      return {
+        customerCategory: row.customer_category,
+        saleType: row.sale_type,
+        price,
+        margin: cost == null ? null : Math.round((price - cost) * 100) / 100,
+      };
+    });
+    return {
+      id: product.id,
+      code: product.code,
+      name: product.name,
+      brand: product.brand,
+      category: product.category,
+      cost,
+      prices,
+    };
+  });
+
+  return { brands, products };
 }
 
 export function resolvePrice(
@@ -599,6 +1278,14 @@ export async function createUser(
   db: Db,
   input: CreateUserInput,
 ): Promise<User> {
+  if (!input.storeId?.trim()) {
+    throw new AppError(
+      input.role === "Empleado"
+        ? "El empleado debe estar atado a una sucursal"
+        : "Elige una sucursal base para la cuenta",
+      400,
+    );
+  }
   assertFound(
     db.prepare("SELECT id FROM stores WHERE id = ?").get(input.storeId),
     "Sucursal no encontrada",

@@ -88,17 +88,30 @@ function packageDir(name) {
   }
 }
 
+function findPackageDir(name) {
+  try {
+    return packageDir(name);
+  } catch {
+    // Hay paquetes sin entrada "." en exports (ej. math-intrinsics):
+    // se busca la carpeta node_modules hacia arriba.
+    let dir = path.join(root, "apps", "server");
+    while (true) {
+      const candidate = path.join(dir, "node_modules", name, "package.json");
+      if (fs.existsSync(candidate)) return path.dirname(candidate);
+      const parent = path.dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+  }
+}
+
 const seen = new Set();
 function copyDependency(name) {
   const bare = name.startsWith("node:") ? name.slice(5) : name;
   if (seen.has(name) || name.startsWith("@types/") || builtinModules.includes(bare)) return;
-  try {
-    require.resolve(name);
-  } catch {
-    return;
-  }
+  const srcDir = findPackageDir(name);
+  if (!srcDir) return;
   seen.add(name);
-  const srcDir = packageDir(name);
   const manifest = path.join(srcDir, "package.json");
   const destDir = path.join(stage, "node_modules", name);
   copyTree(srcDir, destDir);
@@ -147,7 +160,7 @@ const insertUser = catalog.prepare(
    VALUES (?, ?, ?, ?, ?, ?, NULL, 1, ?)`,
 );
 const accounts = [
-  ["admin", "Admin", storeId.AME, "Admin#12", "Administrador"],
+  ["admin", "Admin", storeId.AME, "Admin#123456", "Administrador"],
   ["usuario", "Empleado", storeId.AME, "Venta#01", "Usuario Americas"],
   ["usuario1", "Empleado", storeId.HEN, "Venta#02", "Usuario Henequen"],
   ["usuario2", "Empleado", storeId.CHI, "Venta#03", "Usuario Chihuahua"],

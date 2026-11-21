@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import nodemailer from "nodemailer";
-import { config, mailSettings, whatsappSettings } from "../config.js";
+import {
+  config,
+  hqEmailSettings,
+  mailSettings,
+  whatsappSettings,
+} from "../config.js";
 import { formatTicket, type TicketData } from "./print.js";
 
 export type { TicketData };
@@ -71,7 +76,7 @@ export async function buildTicketPdf(data: TicketData): Promise<Uint8Array> {
   return doc.save();
 }
 
-export type DeliveryChannel = "email" | "whatsapp";
+export type DeliveryChannel = "email" | "whatsapp" | "none";
 
 export type DeliveryResult = {
   ok: boolean;
@@ -211,6 +216,15 @@ export async function deliverTicketDelivery(
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${data.folio}.pdf`);
   fs.writeFileSync(file, pdf);
+  try {
+    fs.writeFileSync(path.join(dir, `${data.folio}.txt`), text, "utf8");
+  } catch {
+    // El texto local es opcional; el PDF ya quedó guardado.
+  }
+
+  if (delivery.channel === "none") {
+    return { ok: true, text, sent: false, channel: "none", destination: "" };
+  }
 
   if (delivery.channel === "whatsapp") {
     const phone = normalizePhone(delivery.phone ?? "");
@@ -255,6 +269,84 @@ export async function deliverTicketDelivery(
         ? "El correo de envío rechazó la contraseña. En Gmail, Outlook y Hotmail se usa una contraseña de aplicación."
         : detail,
     };
+  }
+}
+
+export type HqSaleSummary = {
+  folio: string;
+  date: string;
+  storeName: string;
+  storeCode: string;
+  employee: string;
+  customer: string | null;
+  saleType: string;
+  customerCategory: string;
+  paymentMethod: string | null;
+  lines: { name: string; barcode: string; price: number }[];
+  subtotal: number;
+  discountTotal: number;
+  total: number;
+};
+
+/** Avisa a la oficina central. Nunca lanza: si falla solo se registra. */
+export async function sendHqNotification(
+  summary: HqSaleSummary,
+): Promise<{ sent: boolean; destination: string; error?: string }> {
+  const { to } = hqEmailSettings();
+  const account = mailSettings();
+  if (!account) {
+    console.log(
+      `[hq] Sin correo de envío configurado; no se avisó a ${to} de la venta ${summary.folio}`,
+    );
+    return { sent: false, destination: to };
+  }
+
+  try {
+    const when = new Date(summary.date).toLocaleString("es-MX", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+    const lines = summary.lines
+      .map((l) => `- ${l.name} (${l.barcode})  $${l.price.toFixed(2)}`)
+      .join("\n");
+    const text = [
+      `Venta ${summary.folio} - ${summary.storeName} (${summary.storeCode})`,
+      `Fecha: ${when}`,
+      `Empleado: ${summary.employee}`,
+      `Cliente: ${summary.customer ?? "Mostrador"}`,
+      `Tipo: ${summary.saleType} / ${summary.customerCategory}`,
+      `Pago: ${summary.paymentMethod ?? "Sin definir"}`,
+      "",
+      lines,
+      "",
+      `Subtotal: $${summary.subtotal.toFixed(2)}`,
+      summary.discountTotal > 0
+        ? `Descuento: -$${summary.discountTotal.toFixed(2)}`
+        : "",
+      `TOTAL: $${summary.total.toFixed(2)}`,
+    ]
+      .filter((row, i, all) => row !== "" || all[i - 1] !== "")
+      .join("\n");
+
+    const transport = nodemailer.createTransport({
+      host: account.host,
+      port: account.port,
+      secure: account.port === 465,
+      requireTLS: account.port !== 465,
+      auth: { user: account.user, pass: account.pass },
+    });
+    await transport.sendMail({
+      from: account.from,
+      to,
+      subject: `Venta ${summary.folio} - ${summary.storeName} - $${summary.total.toFixed(2)}`,
+      text,
+    });
+    return { sent: true, destination: to };
+  } catch (err) {
+    const detail =
+      err instanceof Error ? err.message : "No se pudo enviar el aviso a oficina";
+    console.error(`[hq] Falló el aviso de la venta ${summary.folio}: ${detail}`);
+    return { sent: false, destination: to, error: detail };
   }
 }
 

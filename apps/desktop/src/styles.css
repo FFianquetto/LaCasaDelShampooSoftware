@@ -165,6 +165,12 @@ a {
   padding: 0.9rem 1rem;
 }
 
+button.stat {
+  font: inherit;
+  color: inherit;
+  width: 100%;
+}
+
 .stat strong {
   display: block;
   font-size: 1.4rem;
@@ -187,10 +193,156 @@ a {
 .form-row input,
 .form-row select,
 .form-row textarea {
-  border: 1px solid var(--line);
+  border: 1.5px solid #b5a790;
   background: #fff;
   border-radius: 10px;
   padding: 0.65rem 0.75rem;
+  color: var(--ink);
+}
+
+.form-row input:focus,
+.form-row select:focus,
+.form-row textarea:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15, 107, 76, 0.12);
+}
+
+.password-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-field input {
+  width: 100%;
+  padding-right: 2.75rem;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0.45rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.password-toggle:hover {
+  color: var(--ink);
+  background: rgba(28, 42, 36, 0.06);
+}
+
+.money-input {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  border: 1.5px solid #b5a790;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 0.75rem;
+  min-height: 2.6rem;
+}
+
+.money-input:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15, 107, 76, 0.12);
+}
+
+.money-input.disabled {
+  opacity: 0.65;
+}
+
+.money-prefix {
+  color: var(--muted);
+  font-weight: 700;
+  user-select: none;
+}
+
+.money-input input {
+  flex: 1;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: transparent;
+  padding: 0.55rem 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.date-input {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1.5px solid #b5a790;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 0.4rem 0 0.75rem;
+  min-height: 2.6rem;
+}
+
+.date-input:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(15, 107, 76, 0.12);
+}
+
+.date-input.disabled {
+  opacity: 0.65;
+}
+
+.date-input > input[type="text"] {
+  flex: 1;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: transparent;
+  padding: 0.55rem 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.date-input-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.date-input-picker:hover {
+  color: var(--ink);
+  background: rgba(28, 42, 36, 0.06);
+}
+
+.date-input-picker input[type="date"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.spent-cell {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .form-inline {
@@ -204,7 +356,7 @@ a {
   flex: 0 0 auto;
   width: auto;
   height: 2.75rem;
-  border: 1px solid var(--line);
+  border: 1.5px solid #b5a790;
   background: #fff;
   border-radius: 10px;
   padding: 0 0.75rem;
@@ -278,7 +430,7 @@ a {
   width: auto;
   min-width: 0;
   height: 2.75rem;
-  border: 1px solid var(--line);
+  border: 1.5px solid #b5a790;
   background: #fff;
   border-radius: 10px;
   padding: 0 0.75rem;
@@ -457,6 +609,150 @@ th {
 .badge.muted {
   background: #ece7dc;
   color: var(--muted);
+}
+
+.report-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+
+.report-tabs button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--brand-deep);
+  border-radius: 10px;
+  padding: 0.55rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.report-tabs button:hover {
+  background: #f6f1e6;
+}
+
+.report-tabs button.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.stock-ok {
+  color: var(--ok);
+  font-weight: 700;
+}
+
+.stock-out {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.modal.wide {
+  width: min(1000px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.modal.scroll {
+  width: min(560px, 100%);
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.stock-alert-back {
+  z-index: 80;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+}
+
+.stock-alert-modal {
+  width: min(720px, 96vw);
+  max-height: min(88vh, 720px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.stock-alert-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.1rem 1.25rem 0.65rem;
+  border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+
+.stock-alert-close {
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 1.45rem;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.stock-alert-close:hover {
+  background: #f3eee4;
+}
+
+.stock-alert-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.85rem 1.25rem 1rem;
+  -webkit-overflow-scrolling: touch;
+}
+
+.stock-alert-footer {
+  flex: 0 0 auto;
+  padding: 0.85rem 1.25rem 1.15rem;
+  border-top: 1px solid var(--line);
+}
+
+.stock-alert-footer .btn {
+  width: 100%;
+}
+
+.detail-title {
+  font-family: var(--display);
+  font-size: 1.05rem;
+  margin: 1.1rem 0 0.4rem;
+}
+
+.cell-note {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.row-expand > td {
+  background: #f6f1e6;
+}
+
+.stock-adjust {
+  margin-bottom: 1rem;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .error {

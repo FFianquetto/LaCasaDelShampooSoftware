@@ -4,13 +4,18 @@ import {
   createProductSchema,
   createLotSchema,
   createCustomerSchema,
-  updateCustomerRuleSchema,
+  updateCustomerSchema,
   upsertPriceSchema,
   createUserSchema,
   createPromotionSchema,
   commitSaleBaseSchema,
   commitSaleSchema,
   reportQuerySchema,
+  openCashCutSchema,
+  cashMovementSchema,
+  closeCashCutSchema,
+  adjustStockSchema,
+  upsertProductCostSchema,
   UserRole,
 } from "@lcds/shared";
 import { getDb } from "../db.js";
@@ -21,14 +26,19 @@ import {
   listProductCategories,
   createProduct,
   updateProduct,
+  productStockByStore,
   listLots,
   createLot,
   getLotByBarcode,
   listCustomers,
   createCustomer,
-  updateCustomerRule,
+  updateCustomer,
+  customerPurchaseAnalysis,
   listPrices,
   upsertPrice,
+  upsertProductCost,
+  listPriceCostHistory,
+  pricesOverview,
   listUsers,
   createUser,
   deactivateUser,
@@ -36,12 +46,38 @@ import {
   listPromotions,
   createPromotion,
   setPromotionActive,
-} from "../services/catalog.js";
-import { previewSale, commitSale, listRecentTickets } from "../services/sales.js";
+} from "../services/catalog.js";import {
+  previewSale,
+  commitSale,
+  listRecentTickets,
+  listSalesHistory,
+  getSaleDetail,
+} from "../services/sales.js";
+import {
+  openCashCut,
+  getOpenCashCut,
+  addCashMovement,
+  previewCashCut,
+  closeCashCut,
+  listCashCuts,
+  getCashCutDetail,
+  assertCashCutAccess,
+} from "../services/cash.js";
+import {
+  adjustStock,
+  listInventoryAdjustments,
+} from "../services/inventory-adjust.js";
 import {
   salesReport,
   productSalesReport,
+  salesByProductCategoryReport,
+  salesByCustomerCategoryReport,
+  salesByPaymentMethodReport,
+  employeeProductivityReport,
+  customerSalesReport,
+  profitSummary,
   inventorySummary,
+  stockAlerts,
   exportCatalog,
   importCatalog,
   exportStoreReport,
@@ -53,7 +89,12 @@ import {
   type AuthedRequest,
 } from "../middleware.js";
 import { AppError } from "../errors.js";
-import { config } from "../config.js";
+import {
+  config,
+  hqEmailSettings,
+  mailSettings,
+  whatsappSettings,
+} from "../config.js";
 import { z } from "zod";
 
 function param(value: string | string[]): string {
@@ -150,6 +191,17 @@ apiRouter.patch(
   },
 );
 
+apiRouter.get("/products/:id/stock", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const storeId =
+      req.user.role === UserRole.Empleado ? req.user.storeId : undefined;
+    res.json(productStockByStore(getDb(), param(req.params.id), storeId));
+  } catch (err) {
+    next(err);
+  }
+});
+
 apiRouter.get("/lots", requireAuth, (req: AuthedRequest, res) => {
   const storeId =
     req.user?.role === UserRole.Empleado
@@ -214,8 +266,28 @@ apiRouter.patch(
   requireRole(UserRole.Admin),
   (req, res, next) => {
     try {
-      const body = updateCustomerRuleSchema.parse(req.body);
-      res.json(updateCustomerRule(getDb(), param(req.params.id), body));
+      const body = updateCustomerSchema.parse(req.body);
+      res.json(updateCustomer(getDb(), param(req.params.id), body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get(
+  "/customers/:id/analysis",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = z
+        .object({
+          storeId: z.string().optional(),
+          from: z.string().optional(),
+          to: z.string().optional(),
+        })
+        .parse(req.query);
+      res.json(customerPurchaseAnalysis(getDb(), param(req.params.id), query));
     } catch (err) {
       next(err);
     }
@@ -231,14 +303,67 @@ apiRouter.get(
   },
 );
 
-apiRouter.put(
-  "/prices",
+apiRouter.get(
+  "/prices/overview",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res) => {
+    res.json(
+      pricesOverview(getDb(), {
+        brand: (req.query.brand as string | undefined) || undefined,
+        q: (req.query.q as string | undefined) || undefined,
+      }),
+    );
+  },
+);
+
+apiRouter.get(
+  "/prices/history",
   requireAuth,
   requireRole(UserRole.Admin),
   (req, res, next) => {
     try {
+      const query = z
+        .object({
+          productId: z.string().optional(),
+          brand: z.string().optional(),
+          from: z.string().optional(),
+          to: z.string().optional(),
+          kind: z.enum(["cost", "price"]).optional(),
+          limit: z.coerce.number().int().min(1).max(500).optional(),
+        })
+        .parse(req.query);
+      res.json(listPriceCostHistory(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.put(
+  "/prices",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req: AuthedRequest, res, next) => {
+    try {
+      if (!req.user) throw new AppError("No autenticado", 401);
       const body = upsertPriceSchema.parse(req.body);
-      res.json(upsertPrice(getDb(), body));
+      res.json(upsertPrice(getDb(), body, req.user.id));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.put(
+  "/prices/cost",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req: AuthedRequest, res, next) => {
+    try {
+      if (!req.user) throw new AppError("No autenticado", 401);
+      const body = upsertProductCostSchema.parse(req.body);
+      res.json(upsertProductCost(getDb(), req.user.id, body));
     } catch (err) {
       next(err);
     }
@@ -331,6 +456,46 @@ apiRouter.get("/sales/recent", requireAuth, (req: AuthedRequest, res, next) => {
   }
 });
 
+const salesHistoryQuerySchema = reportQuerySchema.extend({
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+
+apiRouter.get("/sales/history", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const { limit, offset, ...filters } = salesHistoryQuerySchema.parse(req.query);
+    // Por cuenta: el empleado solo ve sus ventas en su sucursal.
+    if (req.user.role === UserRole.Empleado) {
+      filters.userId = req.user.id;
+      filters.storeId = req.user.storeId;
+    }
+    res.json(
+      listSalesHistory(getDb(), filters, {
+        limit,
+        offset,
+        viewer: { id: req.user.id, role: req.user.role },
+      }),
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/sales/:id", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    res.json(
+      getSaleDetail(getDb(), param(req.params.id), {
+        id: req.user.id,
+        role: req.user.role,
+      }),
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
 apiRouter.post("/sales/preview", requireAuth, (req, res, next) => {
   try {
     const body = commitSaleBaseSchema
@@ -362,14 +527,18 @@ apiRouter.post("/sales/commit", requireAuth, async (req: AuthedRequest, res, nex
 
 apiRouter.get("/reports/sales", requireAuth, (req: AuthedRequest, res, next) => {
   try {
+    if (!req.user) throw new AppError("No autenticado", 401);
     const query = reportQuerySchema.parse(req.query);
-    const isAdmin = req.user?.role === UserRole.Admin;
-    const storeId =
-      req.user?.role === UserRole.Empleado
-        ? req.user.storeId
-        : query.storeId;
+    const isAdmin = req.user.role === UserRole.Admin;
+    // Empleado: solo sus ventas en su sucursal. Admin: por cuenta y/o sucursal.
+    const storeId = isAdmin ? query.storeId : req.user.storeId;
+    const userId = isAdmin ? query.userId : req.user.id;
     res.json(
-      salesReport(getDb(), { ...query, storeId }, { cashCut: isAdmin }),
+      salesReport(
+        getDb(),
+        { ...query, storeId, userId },
+        { cashCut: isAdmin },
+      ),
     );
   } catch (err) {
     next(err);
@@ -390,15 +559,345 @@ apiRouter.get(
   },
 );
 
-apiRouter.get("/reports/inventory", requireAuth, (req: AuthedRequest, res) => {
-  const storeId =
-    (req.query.storeId as string | undefined) ||
-    req.user!.storeId;
-  if (req.user?.role === UserRole.Empleado && storeId !== req.user.storeId) {
-    throw new AppError("Solo su sucursal", 403);
+apiRouter.get(
+  "/reports/by-product-category",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = reportQuerySchema.parse(req.query);
+      res.json(salesByProductCategoryReport(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get(
+  "/reports/by-customer-category",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = reportQuerySchema.parse(req.query);
+      res.json(salesByCustomerCategoryReport(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/** Resumen del día (o rango) del empleado autenticado; admin puede pedir otro userId. */
+apiRouter.get("/reports/my-day", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const query = reportQuerySchema.parse(req.query);
+    const userId =
+      req.user.role === UserRole.Admin && query.userId
+        ? query.userId
+        : req.user.id;
+    const report = employeeProductivityReport(getDb(), { ...query, userId });
+    const employee = report.employees[0] ?? null;
+    const hideCost = req.user.role !== UserRole.Admin;
+    const strip = (m: {
+      tickets: number;
+      units: number;
+      revenue: number;
+      cost: number;
+      profit: number;
+      avgTicket: number;
+    }) =>
+      hideCost
+        ? {
+            tickets: m.tickets,
+            units: m.units,
+            revenue: m.revenue,
+            avgTicket: m.avgTicket,
+          }
+        : m;
+    res.json({
+      userId,
+      employee: employee
+        ? {
+            userId: employee.userId,
+            employeeName: employee.employeeName,
+            ...strip(employee),
+            bySaleType: employee.bySaleType.map((row) => ({
+              key: row.key,
+              ...strip(row),
+            })),
+            byCustomerCategory: employee.byCustomerCategory.map((row) => ({
+              key: row.key,
+              ...strip(row),
+            })),
+            byProductCategory: employee.byProductCategory.map((row) => ({
+              key: row.key,
+              ...strip(row),
+            })),
+            byPaymentMethod: employee.byPaymentMethod.map((row) => ({
+              key: row.key,
+              ...strip(row),
+            })),
+          }
+        : null,
+    });
+  } catch (err) {
+    next(err);
   }
-  res.json(inventorySummary(getDb(), storeId));
 });
+
+apiRouter.get(
+  "/reports/by-payment",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = reportQuerySchema.parse(req.query);
+      res.json(salesByPaymentMethodReport(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get(
+  "/reports/employees",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = reportQuerySchema.parse(req.query);
+      res.json(employeeProductivityReport(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get(
+  "/reports/customers",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = reportQuerySchema.parse(req.query);
+      res.json(customerSalesReport(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.post("/cash-cuts/open", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const body = openCashCutSchema.parse(req.body);
+    if (req.user.role === UserRole.Empleado) body.storeId = req.user.storeId;
+    res.status(201).json(openCashCut(getDb(), req.user.id, body));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/cash-cuts/current", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const requestedUser = req.query.userId as string | undefined;
+    const requestedStore = req.query.storeId as string | undefined;
+    // Por cuenta: empleado siempre ve el suyo; admin puede pedir otro userId.
+    const userId =
+      req.user.role === UserRole.Admin && requestedUser
+        ? requestedUser
+        : req.user.id;
+    // Sucursal: empleado anclado a la suya; admin filtra solo si la pide.
+    const storeId =
+      req.user.role === UserRole.Empleado
+        ? req.user.storeId
+        : requestedStore || undefined;
+    const db = getDb();
+    const cut = getOpenCashCut(db, storeId, userId);
+    res.json(cut ? previewCashCut(db, cut.id) : { cut: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.post(
+  "/cash-cuts/:id/movements",
+  requireAuth,
+  (req: AuthedRequest, res, next) => {
+    try {
+      if (!req.user) throw new AppError("No autenticado", 401);
+      const body = cashMovementSchema.parse(req.body);
+      res
+        .status(201)
+        .json(
+          addCashMovement(
+            getDb(),
+            param(req.params.id),
+            req.user.id,
+            body,
+            req.user.role,
+          ),
+        );
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get(
+  "/cash-cuts/:id/preview",
+  requireAuth,
+  (req: AuthedRequest, res, next) => {
+    try {
+      if (!req.user) throw new AppError("No autenticado", 401);
+      const db = getDb();
+      assertCashCutAccess(db, param(req.params.id), req.user);
+      res.json(previewCashCut(db, param(req.params.id)));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.post(
+  "/cash-cuts/:id/close",
+  requireAuth,
+  (req: AuthedRequest, res, next) => {
+    try {
+      if (!req.user) throw new AppError("No autenticado", 401);
+      const body = closeCashCutSchema.parse(req.body);
+      res.json(
+        closeCashCut(
+          getDb(),
+          param(req.params.id),
+          req.user.id,
+          body,
+          req.user.role,
+        ),
+      );
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get("/cash-cuts", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const query = z
+      .object({
+        storeId: z.string().optional(),
+        userId: z.string().optional(),
+        status: z.enum(["Abierto", "Cerrado"]).optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(500).optional(),
+      })
+      .parse(req.query);
+    res.json(listCashCuts(getDb(), query, req.user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get("/cash-cuts/:id", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const db = getDb();
+    assertCashCutAccess(db, param(req.params.id), req.user);
+    res.json(getCashCutDetail(db, param(req.params.id)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.post(
+  "/inventory/adjust",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req: AuthedRequest, res, next) => {
+    try {
+      if (!req.user) throw new AppError("No autenticado", 401);
+      const body = adjustStockSchema.parse(req.body);
+      res.status(201).json(adjustStock(getDb(), req.user.id, body));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get(
+  "/inventory/adjustments",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const query = z
+        .object({
+          productId: z.string().optional(),
+          storeId: z.string().optional(),
+          userId: z.string().optional(),
+          from: z.string().optional(),
+          to: z.string().optional(),
+          limit: z.coerce.number().int().min(1).max(1000).optional(),
+          offset: z.coerce.number().int().min(0).optional(),
+        })
+        .parse(req.query);
+      res.json(listInventoryAdjustments(getDb(), query));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get("/reports/inventory", requireAuth, (req: AuthedRequest, res, next) => {
+  try {
+    if (!req.user) throw new AppError("No autenticado", 401);
+    const requested = (req.query.storeId as string | undefined) || undefined;
+    if (req.user.role === UserRole.Empleado) {
+      res.json(inventorySummary(getDb(), req.user.storeId));
+      return;
+    }
+    // Admin: sin storeId = todas las sucursales; con storeId = solo esa.
+    res.json(inventorySummary(getDb(), requested));
+  } catch (err) {
+    next(err);
+  }
+});
+
+apiRouter.get(
+  "/reports/stock-alerts",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      const storeId = (req.query.storeId as string | undefined) || undefined;
+      res.json(stockAlerts(getDb(), storeId));
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+apiRouter.get(
+  "/reports/profit",
+  requireAuth,
+  requireRole(UserRole.Admin),
+  (req, res, next) => {
+    try {
+      res.json(
+        profitSummary(getDb(), {
+          storeId: (req.query.storeId as string | undefined) || undefined,
+          userId: (req.query.userId as string | undefined) || undefined,
+        }),
+      );
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 apiRouter.post(
   "/sync/export-catalog",
@@ -467,5 +966,8 @@ apiRouter.get("/config", requireAuth, (_req, res) => {
     exportsDir: config.exportsDir,
     printMode: config.printMode,
     dbPath: config.dbPath,
+    hqEmail: hqEmailSettings().to,
+    mailConfigured: mailSettings() !== null,
+    whatsappConfigured: whatsappSettings() !== null,
   });
 });

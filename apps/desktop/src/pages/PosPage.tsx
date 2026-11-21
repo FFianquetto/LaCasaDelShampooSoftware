@@ -1,58 +1,43 @@
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { PRODUCT_CATEGORIES, type Product, type Store } from "@lcds/shared";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { formatDateTime } from "../util";
+
+type AdjustMode = "set" | "increase" | "decrease";
+
+type StockAdjustment = {
+  id: string;
+  storeCode: string;
+  employeeName: string;
+  previousQty: number;
+  newQty: number;
+  delta: number;
+  reason: string;
+  createdAt: string;
+};
+
+type AdjustResult = {
+  adjustment: StockAdjustment | null;
+  previousQty: number;
+  newQty: number;
+  delta: number;
+  created: number;
+  removed: number;
+};
+
+const ADJUST_MODE_LABEL: Record<AdjustMode, string> = {
+  set: "Fijar existencia en…",
+  increase: "Aumentar en…",
+  decrease: "Disminuir en…",
+};
 
 type CatalogRow = Product & {
   disponible: number;
   vendido: number;
   price: number | null;
   tacha?: boolean;
-};
-
-type ProductReport = {
-  products: {
-    id: string;
-    code: string | null;
-    name: string;
-    brand: string | null;
-    units: number;
-    revenue: number;
-  }[];
-  totals: { products: number; units: number; revenue: number };
-};
-
-type Period = "dia" | "semana" | "mes";
-
-function startOfDay(date: Date) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
-function endOfDay(date: Date) {
-  const value = new Date(date);
-  value.setHours(23, 59, 59, 999);
-  return value;
-}
-
-function periodRange(period: Period, today: Date) {
-  const to = endOfDay(today);
-  const from = startOfDay(today);
-  if (period === "semana") {
-    const weekday = from.getDay();
-    const offset = weekday === 0 ? 6 : weekday - 1;
-    from.setDate(from.getDate() - offset);
-  }
-  if (period === "mes") from.setDate(1);
-  return { from: from.toISOString(), to: to.toISOString() };
-}
-
-const PERIOD_LABEL: Record<Period, string> = {
-  dia: "Día",
-  semana: "Semana",
-  mes: "Mes",
 };
 
 export function PosPage() {
@@ -66,8 +51,23 @@ export function PosPage() {
   const [selected, setSelected] = useState<CatalogRow | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [salePeriod, setSalePeriod] = useState<Period>("mes");
-  const [productReport, setProductReport] = useState<ProductReport | null>(null);
+  const [adjMode, setAdjMode] = useState<AdjustMode>("increase");
+  const [adjQty, setAdjQty] = useState("");
+  const [adjReason, setAdjReason] = useState("");
+  const [adjustments, setAdjustments] = useState<StockAdjustment[]>([]);
+  const [adjMessage, setAdjMessage] = useState<string | null>(null);
+  const [adjError, setAdjError] = useState<string | null>(null);
+  const [stockByStore, setStockByStore] = useState<
+    {
+      storeId: string;
+      storeCode: string;
+      storeName: string;
+      disponible: number;
+      vendido: number;
+    }[]
+  >([]);
+  /** Sucursal sobre la que se edita el stock (obligatoria; nunca "todas"). */
+  const [editStoreId, setEditStoreId] = useState("");
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -97,24 +97,6 @@ export function PosPage() {
       cancelled = true;
     };
   }, [isAdmin, store?.id, storeId]);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    let cancelled = false;
-    const range = periodRange(salePeriod, new Date());
-    const params = new URLSearchParams(range);
-    if (storeId) params.set("storeId", storeId);
-    void api<ProductReport>(`/reports/products?${params}`)
-      .then((data) => {
-        if (!cancelled) setProductReport(data);
-      })
-      .catch(() => {
-        if (!cancelled) setProductReport(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdmin, salePeriod, storeId]);
 
   const visible = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -148,6 +130,116 @@ export function PosPage() {
     }
   }
 
+  const selectedId = selected?.id;
+  const editStore = stores.find((item) => item.id === editStoreId);
+  const editStock = stockByStore.find((item) => item.storeId === editStoreId);
+
+  async function loadAdjustments(productId: string, storeFilter: string) {
+    const params = new URLSearchParams({ productId, limit: "10" });
+    if (storeFilter) params.set("storeId", storeFilter);
+    try {
+      setAdjustments(await api<StockAdjustment[]>(`/inventory/adjustments?${params}`));
+    } catch {
+      setAdjustments([]);
+    }
+  }
+
+  async function loadStockByStore(productId: string) {
+    try {
+      setStockByStore(
+        await api<
+          {
+            storeId: string;
+            storeCode: string;
+            storeName: string;
+            disponible: number;
+            vendido: number;
+          }[]
+        >(`/products/${productId}/stock`),
+      );
+    } catch {
+      setStockByStore([]);
+    }
+  }
+
+  function openProduct(row: CatalogRow) {
+    setSelected(row);
+    setAdjQty("");
+    setAdjReason("");
+    setAdjMessage(null);
+    setAdjError(null);
+    setAdjMode("increase");
+    // Si el filtro global ya es una sucursal, editar esa; si no, pedir elección.
+    setEditStoreId(activeStoreId ?? "");
+  }
+
+  useEffect(() => {
+    if (!isAdmin || !selectedId) {
+      setAdjustments([]);
+      setStockByStore([]);
+      return;
+    }
+    void loadStockByStore(selectedId);
+    void loadAdjustments(selectedId, editStoreId || "");
+  }, [isAdmin, selectedId, editStoreId]);
+
+  async function onAdjust(event: FormEvent) {
+    event.preventDefault();
+    if (!selected) return;
+    if (!editStoreId) {
+      setAdjError("Elige la sucursal donde quieres modificar el stock");
+      return;
+    }
+    const quantity = Number(adjQty);
+    if (!Number.isInteger(quantity) || quantity < 0) {
+      setAdjError("La cantidad debe ser un número entero (0 o más)");
+      return;
+    }
+    if (!adjReason.trim()) {
+      setAdjError("Escribe el motivo del ajuste");
+      return;
+    }
+    const storeLabel =
+      editStore?.name.replace("La Casa del Shampoo — ", "") ?? "esta sucursal";
+    const confirmed = window.confirm(
+      `¿Modificar stock de ${selected.code ?? selected.name} solo en ${storeLabel}?\n\n` +
+        `Existencia actual en ${storeLabel}: ${editStock?.disponible ?? 0}\n` +
+        `Las demás sucursales no cambian.`,
+    );
+    if (!confirmed) return;
+
+    setBusy(true);
+    setAdjError(null);
+    setAdjMessage(null);
+    try {
+      const result = await api<AdjustResult>("/inventory/adjust", {
+        method: "POST",
+        body: JSON.stringify({
+          productId: selected.id,
+          storeId: editStoreId,
+          mode: adjMode,
+          quantity,
+          reason: adjReason.trim(),
+        }),
+      });
+      setAdjMessage(
+        result.delta === 0
+          ? `Sin cambios en ${storeLabel}: la existencia ya era ${result.newQty}.`
+          : `${storeLabel}: ${result.previousQty} → ${result.newQty} (${result.delta > 0 ? "+" : ""}${result.delta}).`,
+      );
+      setAdjQty("");
+      setAdjReason("");
+      const refreshed = await loadCatalog(activeStoreId);
+      setRows(refreshed);
+      setSelected(refreshed.find((row) => row.id === selected.id) ?? selected);
+      await loadStockByStore(selected.id);
+      await loadAdjustments(selected.id, editStoreId);
+    } catch (err) {
+      setAdjError(err instanceof ApiError ? err.message : "No se pudo ajustar la existencia");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <div>
       <h1 className="page-title">Inventario</h1>
@@ -216,96 +308,58 @@ export function PosPage() {
               <th>Precio</th>
               <th>Disponibles</th>
               <th>Vendidos</th>
+              {isAdmin && <th></th>}
             </tr>
           </thead>
           <tbody>
             {visible.map((row) => (
               <tr
                 key={row.id}
-                className={[
-                  row.tacha ? "row-tacha" : "",
-                  isAdmin ? "row-link" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ") || undefined}
-                onClick={isAdmin ? () => setSelected(row) : undefined}
+                className={row.tacha ? "row-tacha" : undefined}
               >
                 <td>{row.code ?? "—"}</td>
                 <td>{row.name}</td>
                 <td>{row.brand ?? "—"}</td>
                 <td>{row.category ?? "—"}</td>
                 <td>{row.price == null ? "—" : `$${row.price.toFixed(2)}`}</td>
-                <td>{row.tacha ? "✗" : row.disponible}</td>
+                <td>
+                  {row.tacha ? (
+                    "✗"
+                  ) : (
+                    <span className={row.disponible > 0 ? "stock-ok" : "stock-out"}>
+                      {row.disponible}
+                    </span>
+                  )}
+                </td>
                 <td>{row.vendido}</td>
+                {isAdmin && (
+                  <td>
+                    <button
+                      type="button"
+                      className="btn secondary"
+                      style={{ padding: "0.3rem 0.55rem" }}
+                      onClick={() => openProduct(row)}
+                    >
+                      Editar stock
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
+        {isAdmin && !storeId && (
+          <p className="page-sub" style={{ margin: "0.75rem 0 0" }}>
+            Vista de todas las sucursales: el total disponible es la suma. Para
+            modificar stock usa <strong>Editar stock</strong> y elige la sucursal.
+          </p>
+        )}
       </div>
-
-      {isAdmin && (
-        <div className="panel table-wrap" style={{ marginTop: "1rem" }}>
-          <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-            Reporte de venta por producto
-          </h2>
-          <div className="store-buttons" style={{ margin: "0 0 1rem" }}>
-            {(Object.keys(PERIOD_LABEL) as Period[]).map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={salePeriod === item ? "btn" : "btn secondary"}
-                onClick={() => setSalePeriod(item)}
-              >
-                {PERIOD_LABEL[item]}
-              </button>
-            ))}
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Producto</th>
-                <th>Marca</th>
-                <th>Unidades</th>
-                <th>Importe</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(productReport?.products.length ?? 0) === 0 ? (
-                <tr>
-                  <td colSpan={5}>Sin ventas de productos en este periodo.</td>
-                </tr>
-              ) : (
-                productReport?.products.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.code ?? "—"}</td>
-                    <td>{row.name}</td>
-                    <td>{row.brand ?? "—"}</td>
-                    <td>{row.units}</td>
-                    <td>${row.revenue.toFixed(2)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-            {productReport && productReport.products.length > 0 && (
-              <tfoot>
-                <tr>
-                  <td colSpan={3}>
-                    {productReport.totals.products} productos
-                  </td>
-                  <td>{productReport.totals.units}</td>
-                  <td>${productReport.totals.revenue.toFixed(2)}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      )}
 
       {isAdmin && selected && (
         <div className="modal-back" onClick={() => setSelected(null)}>
           <div
-            className="modal"
+            className="modal scroll"
             role="dialog"
             aria-modal="true"
             onClick={(event) => event.stopPropagation()}
@@ -316,6 +370,161 @@ export function PosPage() {
             <p className="page-sub">
               {selected.brand ?? "Sin marca"} · {selected.category ?? "Sin categoría"}
             </p>
+
+            <div className="stock-adjust">
+              <h3 className="detail-title" style={{ marginTop: 0 }}>
+                Stock por sucursal
+              </h3>
+              <p className="page-sub">
+                El cambio aplica solo a la sucursal elegida. El total global se
+                actualiza con la suma de las tres.
+              </p>
+              <div className="table-wrap" style={{ marginBottom: "0.85rem" }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Sucursal</th>
+                      <th>Disponibles</th>
+                      <th>Vendidos</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockByStore.map((item) => {
+                      const active = item.storeId === editStoreId;
+                      return (
+                        <tr key={item.storeId} className={active ? "row-link selected" : undefined}>
+                          <td>
+                            {item.storeCode} —{" "}
+                            {item.storeName.replace("La Casa del Shampoo — ", "")}
+                          </td>
+                          <td>
+                            <span
+                              className={
+                                item.disponible > 0 ? "stock-ok" : "stock-out"
+                              }
+                            >
+                              {item.disponible}
+                            </span>
+                          </td>
+                          <td>{item.vendido}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className={active ? "btn" : "btn secondary"}
+                              style={{ padding: "0.3rem 0.55rem" }}
+                              onClick={() => {
+                                setEditStoreId(item.storeId);
+                                setAdjError(null);
+                                setAdjMessage(null);
+                              }}
+                            >
+                              {active ? "Editando…" : "Editar aquí"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <h3 className="detail-title">Ajustar existencia</h3>
+              {!editStoreId ? (
+                <p className="notice">
+                  Elige una sucursal con el botón <strong>Editar aquí</strong>.
+                </p>
+              ) : (
+                <form onSubmit={(event) => void onAdjust(event)}>
+                  {adjError && <div className="error">{adjError}</div>}
+                  {adjMessage && <div className="success">{adjMessage}</div>}
+                  <p className="page-sub">
+                    Sucursal:{" "}
+                    <strong>
+                      {editStore?.name.replace("La Casa del Shampoo — ", "")}
+                    </strong>{" "}
+                    · Disponible ahora:{" "}
+                    <strong>{editStock?.disponible ?? 0}</strong>
+                  </p>
+                  <div className="form-row">
+                    <label>Tipo de ajuste</label>
+                    <select
+                      value={adjMode}
+                      onChange={(e) => setAdjMode(e.target.value as AdjustMode)}
+                    >
+                      {(Object.keys(ADJUST_MODE_LABEL) as AdjustMode[]).map((key) => (
+                        <option key={key} value={key}>
+                          {ADJUST_MODE_LABEL[key]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-row">
+                    <label>Cantidad</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={adjQty}
+                      onChange={(e) => setAdjQty(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Motivo</label>
+                    <input
+                      value={adjReason}
+                      maxLength={300}
+                      placeholder="Ej. conteo físico, merma, entrada de proveedor"
+                      onChange={(e) => setAdjReason(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <button
+                    className="btn accent"
+                    type="submit"
+                    style={{ width: "100%" }}
+                    disabled={busy}
+                  >
+                    {busy ? "Aplicando…" : `Aplicar en ${editStore?.code ?? "sucursal"}`}
+                  </button>
+                </form>
+              )}
+              <h3 className="detail-title">Últimos ajustes</h3>
+              {adjustments.length === 0 ? (
+                <p className="page-sub">Sin ajustes registrados.</p>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Suc.</th>
+                        <th>Antes → Después</th>
+                        <th>Motivo</th>
+                        <th>Por</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adjustments.map((item) => (
+                        <tr key={item.id}>
+                          <td>{formatDateTime(item.createdAt)}</td>
+                          <td>{item.storeCode}</td>
+                          <td>
+                            {item.previousQty} → {item.newQty} (
+                            {item.delta > 0 ? "+" : ""}
+                            {item.delta})
+                          </td>
+                          <td>{item.reason}</td>
+                          <td>{item.employeeName}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             <button
               className="btn"
               type="button"

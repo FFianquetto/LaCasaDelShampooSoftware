@@ -25,6 +25,15 @@ function tableHasColumn(db: Db, table: string, column: string): boolean {
   return cols.some((c) => c.name === column);
 }
 
+function tableExists(db: Db, table: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    )
+    .get(table) as { ok: number } | undefined;
+  return Boolean(row);
+}
+
 export function migrate(db: Db): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -42,97 +51,130 @@ export function migrate(db: Db): void {
     ).map((r) => r.id),
   );
 
-  const run = db.transaction(() => {
-    for (const migration of MIGRATIONS) {
-      if (applied.has(migration.id)) continue;
+  // SQLite no permite cambiar foreign_keys dentro de una transacción.
+  // Migraciones que recrean tablas (p. ej. 002, 014) necesitan FK desactivadas.
+  db.pragma("foreign_keys = OFF");
+  try {
+    const run = db.transaction(() => {
+      for (const migration of MIGRATIONS) {
+        if (applied.has(migration.id)) continue;
 
-      // BD nueva ya con schema actualizado: saltar migraciones de columnas
-      if (migration.id === 2 && tableHasColumn(db, "products", "brand")) {
+        // BD nueva ya con schema actualizado: saltar migraciones de columnas
+        if (migration.id === 2 && tableHasColumn(db, "products", "brand")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+        if (migration.id === 3 && tableHasColumn(db, "products", "category")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+        if (migration.id === 4 && tableHasColumn(db, "products", "code")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 5 && tableHasColumn(db, "customers", "store_id")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (
+          migration.id === 6 &&
+          tableHasColumn(db, "inventory_marks", "product_id")
+        ) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 8 && tableHasColumn(db, "customers", "client_number")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 13 && tableHasColumn(db, "sales", "ticket_phone")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 12 && tableHasColumn(db, "users", "phone")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 11 && tableHasColumn(db, "customers", "email")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 10 && tableHasColumn(db, "sales", "ticket_email")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 9 && tableHasColumn(db, "products", "barcode")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 14 && tableHasColumn(db, "cash_cuts", "opening_cash")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 15 && tableExists(db, "price_cost_history")) {
+          db.prepare(
+            "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
+          ).run(migration.id, migration.name);
+          continue;
+        }
+
+        if (migration.id === 14) {
+          if (!tableHasColumn(db, "customers", "address")) {
+            db.exec("ALTER TABLE customers ADD COLUMN address TEXT");
+          }
+          if (!tableHasColumn(db, "customers", "branch_name")) {
+            db.exec("ALTER TABLE customers ADD COLUMN branch_name TEXT");
+          }
+          if (!tableHasColumn(db, "sale_items", "unit_cost")) {
+            db.exec("ALTER TABLE sale_items ADD COLUMN unit_cost REAL");
+          }
+        }
+
+        db.exec(migration.sql);
         db.prepare(
           "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
         ).run(migration.id, migration.name);
-        continue;
       }
-      if (migration.id === 3 && tableHasColumn(db, "products", "category")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-      if (migration.id === 4 && tableHasColumn(db, "products", "code")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
+    });
 
-      if (migration.id === 5 && tableHasColumn(db, "customers", "store_id")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      if (
-        migration.id === 6 &&
-        tableHasColumn(db, "inventory_marks", "product_id")
-      ) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      if (migration.id === 8 && tableHasColumn(db, "customers", "client_number")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      if (migration.id === 13 && tableHasColumn(db, "sales", "ticket_phone")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      if (migration.id === 12 && tableHasColumn(db, "users", "phone")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      if (migration.id === 11 && tableHasColumn(db, "customers", "email")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      if (migration.id === 10 && tableHasColumn(db, "sales", "ticket_email")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      if (migration.id === 9 && tableHasColumn(db, "products", "barcode")) {
-        db.prepare(
-          "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-        ).run(migration.id, migration.name);
-        continue;
-      }
-
-      db.exec(migration.sql);
-      db.prepare(
-        "INSERT INTO schema_migrations (id, name) VALUES (?, ?)",
-      ).run(migration.id, migration.name);
-    }
-  });
-
-  run();
+    run();
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
   assignProductCodes(db);
   syncProductBarcodes(db);
   assignDistributorDefaults(db);
@@ -214,6 +256,27 @@ function syncProductBarcodes(db: Db): void {
   ).run();
 }
 
+const CLIENT_NUMBER_SCHEME = "C####-v1";
+
+function nextClientCodeNumber(db: Db): number {
+  const existing = db
+    .prepare(
+      `SELECT client_number FROM customers
+       WHERE client_number GLOB 'C[0-9]*'`,
+    )
+    .all() as { client_number: string }[];
+  let max = 0;
+  for (const row of existing) {
+    const value = Number(row.client_number.slice(1));
+    if (Number.isInteger(value)) max = Math.max(max, value);
+  }
+  return max;
+}
+
+function formatClientCode(index: number): string {
+  return `C${String(index).padStart(4, "0")}`;
+}
+
 function assignDistributorDefaults(db: Db): void {
   if (!tableHasColumn(db, "customers", "client_number")) return;
   if (!tableHasColumn(db, "customers", "purchase_every_days")) return;
@@ -225,35 +288,45 @@ function assignDistributorDefaults(db: Db): void {
        AND purchase_every_days IS NULL`,
   ).run();
 
+  const update = db.prepare(
+    "UPDATE customers SET client_number = ? WHERE id = ?",
+  );
+
+  // Una sola secuencia C0001… como productos P0001 (migra C-#### / D-####).
+  if (getMeta(db, "client_number_scheme") !== CLIENT_NUMBER_SCHEME) {
+    const rows = db
+      .prepare(
+        `SELECT id FROM customers
+         ORDER BY created_at, name COLLATE NOCASE, id`,
+      )
+      .all() as { id: string }[];
+    const tx = db.transaction(() => {
+      rows.forEach((row, index) => {
+        update.run(`TMPC${String(index + 1).padStart(6, "0")}`, row.id);
+      });
+      rows.forEach((row, index) => {
+        update.run(formatClientCode(index + 1), row.id);
+      });
+    });
+    tx();
+    setMeta(db, "client_number_scheme", CLIENT_NUMBER_SCHEME);
+    return;
+  }
+
   const missing = db
     .prepare(
       `SELECT id FROM customers
-       WHERE category IN ('Distribuidor', 'Foraneo')
-         AND (client_number IS NULL OR client_number = '')
-       ORDER BY created_at, name`,
+       WHERE client_number IS NULL OR client_number = ''
+       ORDER BY created_at, name COLLATE NOCASE, id`,
     )
     .all() as { id: string }[];
   if (missing.length === 0) return;
 
-  const existing = db
-    .prepare(
-      `SELECT client_number FROM customers
-       WHERE client_number GLOB 'D-[0-9]*'`,
-    )
-    .all() as { client_number: string }[];
-  let max = 0;
-  for (const row of existing) {
-    const value = Number(row.client_number.slice(2));
-    if (Number.isInteger(value)) max = Math.max(max, value);
-  }
-
-  const update = db.prepare(
-    "UPDATE customers SET client_number = ? WHERE id = ?",
-  );
+  let next = nextClientCodeNumber(db);
   const tx = db.transaction(() => {
     for (const row of missing) {
-      max += 1;
-      update.run(`D-${String(max).padStart(4, "0")}`, row.id);
+      next += 1;
+      update.run(formatClientCode(next), row.id);
     }
   });
   tx();

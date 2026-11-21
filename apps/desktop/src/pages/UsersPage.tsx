@@ -75,7 +75,8 @@ export function UsersPage() {
     <div>
       <h1 className="page-title">Empleados</h1>
       <p className="page-sub">
-        Puedes crear usuarios y darlos de baja. El nombre y la contraseña no se
+        Cada cuenta es de un empleado y sube su propio corte. Los empleados
+        deben estar atados a una sucursal. El nombre y la contraseña no se
         editan: si cambian, se crea una cuenta nueva.
       </p>
       {error && <div className="error">{error}</div>}
@@ -95,10 +96,9 @@ export function UsersPage() {
               type="password"
               value={password}
               minLength={8}
-              maxLength={8}
-              pattern="(?=.*\d)(?=.*[^A-Za-z0-9]).{8}"
-              title="Exactamente 8 caracteres, con al menos un número y un carácter especial"
-              onChange={(e) => setPassword(e.target.value.slice(0, 8))}
+              pattern="(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}"
+              title="Al menos 8 caracteres, con un número y un carácter especial"
+              onChange={(e) => setPassword(e.target.value)}
               required
             />
           </div>
@@ -129,20 +129,23 @@ export function UsersPage() {
             </select>
           </div>
           <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Sucursal</label>
+            <label>
+              {role === "Empleado" ? "Sucursal (obligatoria)" : "Sucursal base"}
+            </label>
             <select
               value={storeId}
               onChange={(e) => setStoreId(e.target.value)}
+              required={role === "Empleado"}
             >
               {stores.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.code}
+                  {s.code} — {s.name.replace("La Casa del Shampoo — ", "")}
                 </option>
               ))}
             </select>
           </div>
           <button className="btn" type="submit">
-            Crear
+            Crear cuenta
           </button>
         </form>
       </div>

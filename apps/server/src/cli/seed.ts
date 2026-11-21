@@ -32,7 +32,7 @@ async function seed() {
     insertStore.run(s.id, s.name, s.code, nowIso());
   }
 
-  const adminHash = await hashPassword("Admin#12");
+  const adminHash = await hashPassword("Admin#123456");
   const empHash = await hashPassword("Venta#01");
 
   db.prepare(
@@ -65,7 +65,7 @@ async function seed() {
   ).run(newId("cus"), nowIso());
 
   console.log("Seed OK — tiendas:", stores.map((s) => s.code).join(", "));
-  console.log("  admin / Admin#12");
+  console.log("  admin / Admin#123456");
   console.log("  usuario se crea aparte; empleados de sucursal usan Venta#01");
   console.log("Siguiente: npm run import:excel -w @lcds/server");
   closeDb();

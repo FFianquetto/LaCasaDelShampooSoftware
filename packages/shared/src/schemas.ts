@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  cashCutStatusSchema,
+  cashMovementTypeSchema,
   customerCategorySchema,
   lotStatusSchema,
   paymentMethodSchema,
@@ -57,9 +59,11 @@ export type Lot = z.infer<typeof lotSchema>;
 export const customerFrequencySchema = z.object({
   salesCount: z.number().int().nonnegative(),
   lastPurchaseAt: z.string().nullable(),
+  nextPurchaseAt: z.string().nullable(),
   avgDaysBetween: z.number().nullable(),
   daysSinceAnchor: z.number().nullable(),
-  status: z.enum(["al_dia", "atrasado", "sin_regla"]),
+  daysOverdue: z.number().nullable(),
+  status: z.enum(["al_dia", "proximo", "atrasado", "sin_regla"]),
 });
 export type CustomerFrequency = z.infer<typeof customerFrequencySchema>;
 
@@ -69,12 +73,16 @@ export const customerSchema = z.object({
   category: customerCategorySchema,
   phone: z.string().nullable(),
   email: z.string().nullable(),
+  address: z.string().nullable(),
+  branchName: z.string().nullable(),
   storeId: z.string().nullable(),
   clientNumber: z.string().nullable(),
   purchaseEveryDays: z.number().int().positive().nullable(),
   active: z.boolean(),
   createdAt: z.string(),
   frequency: customerFrequencySchema.nullable(),
+  /** Total histórico de ventas del cliente (por id o correo del ticket). */
+  totalSpent: z.number().nonnegative().optional(),
 });
 export type Customer = z.infer<typeof customerSchema>;
 
@@ -110,6 +118,7 @@ export const saleItemSchema = z.object({
   barcode: z.string(),
   productName: z.string(),
   unitPrice: z.number(),
+  unitCost: z.number().nullable(),
   discount: z.number(),
   finalPrice: z.number(),
 });
@@ -132,10 +141,10 @@ export const saleSchema = z.object({
 });
 export type Sale = z.infer<typeof saleSchema>;
 
-/** Exactamente 8 caracteres, al menos un número y un carácter especial. */
+/** Al menos 8 caracteres, un número y un carácter especial. */
 export const passwordSchema = z
   .string()
-  .length(8, "La contraseña debe llenar exactamente 8 caracteres")
+  .min(8, "La contraseña debe tener al menos 8 caracteres")
   .regex(/\d/, "Debe incluir al menos un número")
   .regex(/[^A-Za-z0-9]/, "Debe incluir al menos un carácter especial");
 
@@ -184,6 +193,8 @@ export const createCustomerSchema = z.object({
   category: customerCategorySchema,
   phone: z.string().trim().optional(),
   email: z.string().trim().optional(),
+  address: z.string().trim().optional(),
+  branchName: z.string().trim().optional(),
   storeId: z.string().min(1),
   clientNumber: clientNumberSchema.optional(),
   purchaseEveryDays: z.number().int().min(1).max(365).optional(),
@@ -196,13 +207,62 @@ export const updateCustomerRuleSchema = z.object({
 });
 export type UpdateCustomerRuleInput = z.infer<typeof updateCustomerRuleSchema>;
 
+export const updateCustomerSchema = z.object({
+  name: z.string().min(1).optional(),
+  category: customerCategorySchema.optional(),
+  phone: z.string().trim().nullable().optional(),
+  email: z.string().trim().nullable().optional(),
+  address: z.string().trim().nullable().optional(),
+  branchName: z.string().trim().nullable().optional(),
+  storeId: z.string().min(1).nullable().optional(),
+  clientNumber: clientNumberSchema.optional(),
+  purchaseEveryDays: z.number().int().min(1).max(365).nullable().optional(),
+  active: z.boolean().optional(),
+});
+export type UpdateCustomerInput = z.infer<typeof updateCustomerSchema>;
+
 export const upsertPriceSchema = z.object({
   productId: z.string().min(1),
   customerCategory: customerCategorySchema,
   saleType: saleTypeSchema,
   price: z.number().nonnegative(),
+  /** Día de vigencia (YYYY-MM-DD). Por defecto hoy. */
+  effectiveDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Usa fecha AAAA-MM-DD")
+    .optional(),
+  note: z.string().trim().max(300).optional(),
 });
 export type UpsertPriceInput = z.infer<typeof upsertPriceSchema>;
+
+export const upsertProductCostSchema = z.object({
+  productId: z.string().min(1),
+  cost: z.number().nonnegative(),
+  effectiveDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Usa fecha AAAA-MM-DD")
+    .optional(),
+  note: z.string().trim().max(300).optional(),
+});
+export type UpsertProductCostInput = z.infer<typeof upsertProductCostSchema>;
+
+export const priceCostHistorySchema = z.object({
+  id: z.string(),
+  productId: z.string(),
+  productCode: z.string().nullable(),
+  productName: z.string(),
+  brand: z.string().nullable(),
+  kind: z.enum(["cost", "price"]),
+  customerCategory: customerCategorySchema.nullable(),
+  saleType: saleTypeSchema.nullable(),
+  previousValue: z.number().nullable(),
+  newValue: z.number(),
+  effectiveDate: z.string(),
+  note: z.string().nullable(),
+  employeeName: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type PriceCostHistory = z.infer<typeof priceCostHistorySchema>;
 
 export const createUserSchema = z.object({
   username: z.string().min(3),
@@ -237,10 +297,11 @@ export const commitSaleBaseSchema = z.object({
   saleType: saleTypeSchema,
   paymentMethod: paymentMethodSchema.optional(),
   barcodes: z.array(z.string().min(1)).min(1),
-  deliveryChannel: z.enum(["email", "whatsapp"]).default("email"),
+  deliveryChannel: z.enum(["email", "whatsapp", "none"]).default("none"),
   email: z.string().trim().optional(),
   phone: z.string().trim().optional(),
   printTicket: z.boolean().default(true),
+  notifyHq: z.boolean().optional(),
 });
 
 export const commitSaleSchema = commitSaleBaseSchema.superRefine(
@@ -253,7 +314,7 @@ export const commitSaleSchema = commitSaleBaseSchema.superRefine(
           message: "Escribe un correo válido",
         });
       }
-    } else {
+    } else if (value.deliveryChannel === "whatsapp") {
       const digits = (value.phone ?? "").replace(/\D/g, "");
       if (digits.length < 10 || digits.length > 15) {
         ctx.addIssue({
@@ -263,15 +324,79 @@ export const commitSaleSchema = commitSaleBaseSchema.superRefine(
         });
       }
     }
-  });
+  },
+);
 export type CommitSaleInput = z.infer<typeof commitSaleBaseSchema>;
 
 export const reportQuerySchema = z.object({
   storeId: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
+  userId: z.string().optional(),
+  customerId: z.string().optional(),
+  productId: z.string().optional(),
+  category: z.string().optional(),
+  customerCategory: customerCategorySchema.optional(),
+  paymentMethod: paymentMethodSchema.optional(),
+  saleType: saleTypeSchema.optional(),
 });
 export type ReportQuery = z.infer<typeof reportQuerySchema>;
+
+export const openCashCutSchema = z.object({
+  storeId: z.string().min(1),
+  openingCash: z.number().nonnegative(),
+  notes: z.string().trim().optional(),
+});
+export type OpenCashCutInput = z.infer<typeof openCashCutSchema>;
+
+export const cashMovementSchema = z.object({
+  type: cashMovementTypeSchema,
+  amount: z.number().positive(),
+  reason: z.string().trim().min(1).max(200),
+});
+export type CashMovementInput = z.infer<typeof cashMovementSchema>;
+
+export const closeCashCutSchema = z.object({
+  countedCash: z.number().nonnegative(),
+  notes: z.string().trim().optional(),
+});
+export type CloseCashCutInput = z.infer<typeof closeCashCutSchema>;
+
+export const cashCutSchema = z.object({
+  id: z.string(),
+  storeId: z.string(),
+  userId: z.string(),
+  openedAt: z.string(),
+  closedAt: z.string().nullable(),
+  openingCash: z.number(),
+  expectedCash: z.number().nullable(),
+  countedCash: z.number().nullable(),
+  difference: z.number().nullable(),
+  salesCash: z.number(),
+  salesCard: z.number(),
+  salesTransfer: z.number(),
+  salesCredit: z.number(),
+  salesTotal: z.number(),
+  salesCount: z.number(),
+  cashIn: z.number(),
+  cashOut: z.number(),
+  notes: z.string().nullable(),
+  status: cashCutStatusSchema,
+  createdAt: z.string(),
+  employeeName: z.string().optional(),
+  storeName: z.string().optional(),
+  storeCode: z.string().optional(),
+});
+export type CashCut = z.infer<typeof cashCutSchema>;
+
+export const adjustStockSchema = z.object({
+  productId: z.string().min(1),
+  storeId: z.string().min(1),
+  mode: z.enum(["set", "increase", "decrease"]),
+  quantity: z.number().int().nonnegative(),
+  reason: z.string().trim().min(1).max(300),
+});
+export type AdjustStockInput = z.infer<typeof adjustStockSchema>;
 
 export const catalogSyncPayloadSchema = z.object({
   version: z.literal(1),
@@ -312,6 +437,7 @@ export const resolvedCartLineSchema = z.object({
   productId: z.string(),
   productName: z.string(),
   unitPrice: z.number(),
+  unitCost: z.number().nullable().optional(),
   discount: z.number(),
   finalPrice: z.number(),
   promotionName: z.string().nullable(),

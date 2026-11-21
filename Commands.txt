@@ -12,7 +12,7 @@ npm run dev:server
 http://127.0.0.1:5000/
 
 
-admin / Admin#12
+admin / Admin#123456
 usuario / Venta#01 - Americas
 usuario1 / Venta#02 - Henequen
 usuario2 / Venta#03 - Chihuahua

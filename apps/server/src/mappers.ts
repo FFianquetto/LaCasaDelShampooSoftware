@@ -1,4 +1,6 @@
 import type {
+  CashCut,
+  CashCutStatus,
   Customer,
   CustomerCategory,
   Lot,
@@ -73,6 +75,12 @@ export function mapCustomer(row: Record<string, unknown>): Customer {
     category: row.category as CustomerCategory,
     phone: row.phone == null ? null : String(row.phone),
     email: row.email == null || row.email === "" ? null : String(row.email),
+    address:
+      row.address == null || row.address === "" ? null : String(row.address),
+    branchName:
+      row.branch_name == null || row.branch_name === ""
+        ? null
+        : String(row.branch_name),
     storeId: row.store_id == null ? null : String(row.store_id),
     clientNumber:
       row.client_number == null || row.client_number === ""
@@ -83,6 +91,8 @@ export function mapCustomer(row: Record<string, unknown>): Customer {
     active: intToBool(row.active as number),
     createdAt: String(row.created_at),
     frequency: null,
+    totalSpent:
+      row.total_spent == null ? undefined : Number(row.total_spent),
   };
 }
 
@@ -142,7 +152,37 @@ export function mapSaleItem(row: Record<string, unknown>): SaleItem {
     barcode: String(row.barcode),
     productName: String(row.product_name),
     unitPrice: Number(row.unit_price),
+    unitCost: row.unit_cost == null ? null : Number(row.unit_cost),
     discount: Number(row.discount),
     finalPrice: Number(row.final_price),
+  };
+}
+
+export function mapCashCut(row: Record<string, unknown>): CashCut {
+  return {
+    id: String(row.id),
+    storeId: String(row.store_id),
+    userId: String(row.user_id),
+    openedAt: String(row.opened_at),
+    closedAt: row.closed_at == null ? null : String(row.closed_at),
+    openingCash: Number(row.opening_cash ?? 0),
+    expectedCash: row.expected_cash == null ? null : Number(row.expected_cash),
+    countedCash: row.counted_cash == null ? null : Number(row.counted_cash),
+    difference: row.difference == null ? null : Number(row.difference),
+    salesCash: Number(row.sales_cash ?? 0),
+    salesCard: Number(row.sales_card ?? 0),
+    salesTransfer: Number(row.sales_transfer ?? 0),
+    salesCredit: Number(row.sales_credit ?? 0),
+    salesTotal: Number(row.sales_total ?? 0),
+    salesCount: Number(row.sales_count ?? 0),
+    cashIn: Number(row.cash_in ?? 0),
+    cashOut: Number(row.cash_out ?? 0),
+    notes: row.notes == null || row.notes === "" ? null : String(row.notes),
+    status: row.status as CashCutStatus,
+    createdAt: String(row.created_at),
+    employeeName:
+      row.employee_name == null ? undefined : String(row.employee_name),
+    storeName: row.store_name == null ? undefined : String(row.store_name),
+    storeCode: row.store_code == null ? undefined : String(row.store_code),
   };
 }

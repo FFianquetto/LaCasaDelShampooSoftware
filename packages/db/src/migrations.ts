@@ -290,6 +290,146 @@ ALTER TABLE sales ADD COLUMN ticket_channel TEXT;
 ALTER TABLE sales ADD COLUMN ticket_whatsapped INTEGER NOT NULL DEFAULT 0;
 `;
 
+/** Clientes ampliados, costo histórico, Saldo, corte de caja, ajustes de stock.
+ *  address/branch_name/unit_cost se aplican de forma idempotente en connection.ts
+ *  antes de ejecutar este SQL. */
+export const MIGRATION_014 = `
+PRAGMA foreign_keys = OFF;
+
+CREATE TABLE sales_pay_new (
+  id TEXT PRIMARY KEY NOT NULL,
+  folio TEXT NOT NULL UNIQUE,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  customer_id TEXT REFERENCES customers(id),
+  sale_type TEXT NOT NULL CHECK (sale_type IN ('Menudeo', 'Mayoreo')),
+  customer_category TEXT NOT NULL CHECK (customer_category IN ('Publico', 'Distribuidor', 'Foraneo', 'Reparto')),
+  payment_method TEXT CHECK (payment_method IN ('Efectivo', 'Tarjeta', 'Transferencia', 'Saldo')),
+  subtotal REAL NOT NULL,
+  discount_total REAL NOT NULL DEFAULT 0,
+  total REAL NOT NULL,
+  ticket_printed INTEGER NOT NULL DEFAULT 0,
+  ticket_email TEXT,
+  ticket_emailed INTEGER NOT NULL DEFAULT 0,
+  ticket_phone TEXT,
+  ticket_channel TEXT,
+  ticket_whatsapped INTEGER NOT NULL DEFAULT 0,
+  notify_hq INTEGER NOT NULL DEFAULT 0,
+  hq_emailed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+INSERT INTO sales_pay_new (
+  id, folio, store_id, user_id, customer_id, sale_type, customer_category,
+  payment_method, subtotal, discount_total, total, ticket_printed,
+  ticket_email, ticket_emailed, ticket_phone, ticket_channel, ticket_whatsapped,
+  notify_hq, hq_emailed, created_at
+)
+SELECT
+  id, folio, store_id, user_id, customer_id, sale_type, customer_category,
+  payment_method, subtotal, discount_total, total, ticket_printed,
+  ticket_email, ticket_emailed, ticket_phone, ticket_channel, ticket_whatsapped,
+  0, 0, created_at
+FROM sales;
+
+DROP TABLE sales;
+ALTER TABLE sales_pay_new RENAME TO sales;
+CREATE INDEX IF NOT EXISTS idx_sales_store_created ON sales(store_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales(customer_id);
+CREATE INDEX IF NOT EXISTS idx_sales_user_created ON sales(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS cash_cuts (
+  id TEXT PRIMARY KEY NOT NULL,
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  opened_at TEXT NOT NULL,
+  closed_at TEXT,
+  opening_cash REAL NOT NULL DEFAULT 0,
+  expected_cash REAL,
+  counted_cash REAL,
+  difference REAL,
+  sales_cash REAL NOT NULL DEFAULT 0,
+  sales_card REAL NOT NULL DEFAULT 0,
+  sales_transfer REAL NOT NULL DEFAULT 0,
+  sales_credit REAL NOT NULL DEFAULT 0,
+  sales_total REAL NOT NULL DEFAULT 0,
+  sales_count INTEGER NOT NULL DEFAULT 0,
+  cash_in REAL NOT NULL DEFAULT 0,
+  cash_out REAL NOT NULL DEFAULT 0,
+  notes TEXT,
+  status TEXT NOT NULL CHECK (status IN ('Abierto', 'Cerrado')) DEFAULT 'Abierto',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cash_cuts_store_opened ON cash_cuts(store_id, opened_at);
+CREATE INDEX IF NOT EXISTS idx_cash_cuts_user ON cash_cuts(user_id, opened_at);
+
+CREATE TABLE IF NOT EXISTS cash_movements (
+  id TEXT PRIMARY KEY NOT NULL,
+  cash_cut_id TEXT NOT NULL REFERENCES cash_cuts(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL CHECK (type IN ('Entrada', 'Salida', 'Retiro', 'Fondo')),
+  amount REAL NOT NULL CHECK (amount >= 0),
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_cash_movements_cut ON cash_movements(cash_cut_id);
+
+CREATE TABLE IF NOT EXISTS cash_cut_audits (
+  id TEXT PRIMARY KEY NOT NULL,
+  cash_cut_id TEXT NOT NULL REFERENCES cash_cuts(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  action TEXT NOT NULL,
+  before_json TEXT,
+  after_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS inventory_adjustments (
+  id TEXT PRIMARY KEY NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  store_id TEXT NOT NULL REFERENCES stores(id),
+  user_id TEXT NOT NULL REFERENCES users(id),
+  previous_qty INTEGER NOT NULL,
+  new_qty INTEGER NOT NULL,
+  delta INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_inventory_adjustments_product
+  ON inventory_adjustments(product_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_inventory_adjustments_store
+  ON inventory_adjustments(store_id, created_at);
+
+PRAGMA foreign_keys = ON;
+`;
+
+/** Historial de costo y precios por día (vigencia). */
+export const MIGRATION_015 = `
+CREATE TABLE IF NOT EXISTS price_cost_history (
+  id TEXT PRIMARY KEY NOT NULL,
+  product_id TEXT NOT NULL REFERENCES products(id),
+  kind TEXT NOT NULL CHECK (kind IN ('cost', 'price')),
+  customer_category TEXT CHECK (
+    customer_category IS NULL
+    OR customer_category IN ('Publico', 'Distribuidor', 'Foraneo', 'Reparto')
+  ),
+  sale_type TEXT CHECK (
+    sale_type IS NULL OR sale_type IN ('Menudeo', 'Mayoreo')
+  ),
+  previous_value REAL,
+  new_value REAL NOT NULL,
+  effective_date TEXT NOT NULL,
+  note TEXT,
+  user_id TEXT REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_price_cost_history_product
+  ON price_cost_history(product_id, effective_date DESC, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_price_cost_history_day
+  ON price_cost_history(effective_date, kind);
+`;
+
 export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 1, name: "001_initial_schema", sql: MIGRATION_001 },
   { id: 2, name: "002_excel_categories_brand_cost", sql: MIGRATION_002 },
@@ -304,4 +444,6 @@ export const MIGRATIONS: { id: number; name: string; sql: string }[] = [
   { id: 11, name: "011_customer_email", sql: MIGRATION_011 },
   { id: 12, name: "012_user_phone", sql: MIGRATION_012 },
   { id: 13, name: "013_sale_ticket_whatsapp", sql: MIGRATION_013 },
+  { id: 14, name: "014_ops_cash_stock_clients", sql: MIGRATION_014 },
+  { id: 15, name: "015_price_cost_history", sql: MIGRATION_015 },
 ];

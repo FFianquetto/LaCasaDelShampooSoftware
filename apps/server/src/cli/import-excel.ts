@@ -126,6 +126,8 @@ async function main() {
     {
       marca: string;
       producto: string;
+      code: string | null;
+      barcode: string | null;
       costo: number | null;
       publico: number | null;
       distribuidor: number | null;
@@ -141,9 +143,17 @@ async function main() {
     const producto = String(productoRaw).trim();
     const key = `${marca.toLowerCase()}|${producto.toLowerCase()}`;
     if (unique.has(key)) continue;
+    const idRaw = cell(row, "ID");
+    const barcodeRaw =
+      cell(row, "CÓDIGO DE BARRA") ?? cell(row, "CODIGO DE BARRA");
     unique.set(key, {
       marca,
       producto,
+      code: idRaw == null || String(idRaw).trim() === "" ? null : String(idRaw).trim(),
+      barcode:
+        barcodeRaw == null || String(barcodeRaw).trim() === ""
+          ? null
+          : String(barcodeRaw).trim(),
       costo: num(cell(row, "COSTO")),
       publico: num(cell(row, "PRECIO PUBLICO")),
       distribuidor: num(cell(row, "PRECIO DISTRIBUIDOR")),
@@ -192,21 +202,27 @@ async function main() {
 
       if (product) {
         db.prepare(
-          `UPDATE products SET sku = ?, name = ?, brand = ?, category = ?, cost = ?, active = 1 WHERE id = ?`,
+          `UPDATE products
+           SET sku = ?, name = ?, brand = ?, category = ?, cost = ?,
+               code = COALESCE(?, code), barcode = COALESCE(?, barcode), active = 1
+           WHERE id = ?`,
         ).run(
           sku,
           item.producto,
           item.marca,
           category,
           item.costo,
+          item.code,
+          item.barcode,
           product.id,
         );
         updated++;
       } else {
         const id = newId("prd");
         db.prepare(
-          `INSERT INTO products (id, sku, name, brand, category, cost, description, active, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, NULL, 1, ?)`,
+          `INSERT INTO products
+             (id, sku, name, brand, category, cost, code, barcode, description, active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?)`,
         ).run(
           id,
           sku,
@@ -214,6 +230,8 @@ async function main() {
           item.marca,
           category,
           item.costo,
+          item.code,
+          item.barcode,
           nowIso(),
         );
         product = { id };

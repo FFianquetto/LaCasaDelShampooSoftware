@@ -13,6 +13,7 @@ import { formatTicket } from "./print.js";
 import {
   deliverTicketDelivery,
   normalizePhone,
+  sendHqNotification,
   type TicketData,
 } from "./ticket-delivery.js";
 
@@ -191,6 +192,7 @@ export function previewSale(
   let subtotal = 0;
   let discountTotal = 0;
   const seen = new Map<string, number>();
+  const costs = new Map<string, number | null>();
 
   for (const unit of units) {
     const unitPrice = resolvePrice(
@@ -211,12 +213,21 @@ export function previewSale(
     const finalPrice = Math.round((unitPrice - discount) * 100) / 100;
     subtotal += unitPrice;
     discountTotal += discount;
+    let unitCost = costs.get(unit.productId);
+    if (unitCost === undefined) {
+      const costRow = db
+        .prepare("SELECT cost FROM products WHERE id = ?")
+        .get(unit.productId) as { cost: number | null } | undefined;
+      unitCost = costRow?.cost == null ? null : Number(costRow.cost);
+      costs.set(unit.productId, unitCost);
+    }
     lines.push({
       lotId: unit.lotId,
       barcode: unit.barcode,
       productId: unit.productId,
       productName: unit.productName,
       unitPrice,
+      unitCost,
       discount,
       finalPrice,
       promotionName,
@@ -256,10 +267,11 @@ export async function commitSale(
   ticketText: string;
   emailed: boolean;
   email: string;
-  channel: "email" | "whatsapp";
+  channel: "email" | "whatsapp" | "none";
   destination: string;
   delivered: boolean;
   whatsappUrl?: string;
+  hqNotified: boolean;
 }> {
   if (input.customerId) {
     const customer = assertFound(
@@ -306,7 +318,7 @@ export async function commitSale(
       )?.name ?? null
     : null;
 
-  const channel = input.deliveryChannel ?? "email";
+  const channel = input.deliveryChannel ?? "none";
   const email = channel === "email" ? (input.email ?? "").trim() : "";
   const phone = channel === "whatsapp" ? normalizePhone(input.phone ?? "") : "";
 
@@ -337,7 +349,7 @@ export async function commitSale(
     email,
     phone,
   });
-  if (!delivered.ok) {
+  if (channel !== "none" && !delivered.ok) {
     throw new AppError(
       `No se pudo enviar el ticket: ${delivered.error}. La venta no se cerró.`,
       502,
@@ -377,8 +389,9 @@ export async function commitSale(
       `INSERT INTO sales
        (id, folio, store_id, user_id, customer_id, sale_type, customer_category,
         payment_method, subtotal, discount_total, total, ticket_printed,
-        ticket_email, ticket_emailed, ticket_phone, ticket_channel, ticket_whatsapped, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)`,
+        ticket_email, ticket_emailed, ticket_phone, ticket_channel, ticket_whatsapped,
+        notify_hq, hq_emailed, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 0, ?)`,
     ).run(
       saleId,
       folio,
@@ -396,6 +409,7 @@ export async function commitSale(
       phone || null,
       channel,
       channel === "whatsapp" && delivered.sent ? 1 : 0,
+      input.notifyHq ? 1 : 0,
       createdAt,
     );
 
@@ -403,8 +417,8 @@ export async function commitSale(
       const itemId = newId("sit");
       db.prepare(
         `INSERT INTO sale_items
-         (id, sale_id, lot_id, product_id, barcode, product_name, unit_price, discount, final_price)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, sale_id, lot_id, product_id, barcode, product_name, unit_price, unit_cost, discount, final_price)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         itemId,
         saleId,
@@ -413,6 +427,7 @@ export async function commitSale(
         line.barcode,
         line.productName,
         line.unitPrice,
+        line.unitCost ?? null,
         line.discount,
         line.finalPrice,
       );
@@ -444,6 +459,50 @@ export async function commitSale(
       .all(saleId) as Record<string, unknown>[]
   ).map(mapSaleItem);
 
+  // Aviso a oficina: una sola vez y sin romper la venta si falla.
+  let hqNotified = false;
+  if (input.notifyHq) {
+    try {
+      const pending = db
+        .prepare("SELECT hq_emailed FROM sales WHERE id = ?")
+        .get(saleId) as { hq_emailed: number } | undefined;
+      if (pending && Number(pending.hq_emailed) !== 1) {
+        const result = await sendHqNotification({
+          folio,
+          date: createdAt,
+          storeName: String(store.name),
+          storeCode: String(store.code),
+          employee: String(user.full_name),
+          customer: customerName,
+          saleType: input.saleType,
+          customerCategory: input.customerCategory,
+          paymentMethod: input.paymentMethod ?? null,
+          lines: preview.lines.map((l) => ({
+            name: l.productName,
+            barcode: l.barcode,
+            price: l.finalPrice,
+          })),
+          subtotal: preview.subtotal,
+          discountTotal: preview.discountTotal,
+          total: preview.total,
+        });
+        if (result.sent) {
+          db.prepare(
+            "UPDATE sales SET hq_emailed = 1 WHERE id = ? AND hq_emailed = 0",
+          ).run(saleId);
+          hqNotified = true;
+        }
+      } else if (pending) {
+        hqNotified = true;
+      }
+    } catch (err) {
+      console.error(
+        `[hq] No se pudo avisar a oficina de la venta ${folio}:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   return {
     sale,
     items,
@@ -454,6 +513,174 @@ export async function commitSale(
     destination: delivered.destination,
     delivered: delivered.sent,
     whatsappUrl: delivered.whatsappUrl,
+    hqNotified,
+  };
+}
+
+export type SaleHistoryFilters = {
+  storeId?: string;
+  userId?: string;
+  customerId?: string;
+  productId?: string;
+  from?: string;
+  to?: string;
+  paymentMethod?: string;
+  customerCategory?: string;
+  saleType?: string;
+};
+
+export type SaleHistoryViewer = { id: string; role: string };
+
+export type SaleHistoryEntry = Sale & {
+  employeeName: string;
+  customerName: string | null;
+  storeName: string;
+  storeCode: string;
+  hqEmailed: boolean;
+  ticketPhone: string | null;
+  ticketChannel: "email" | "whatsapp" | "none" | null;
+  items: SaleItem[];
+};
+
+const SALE_HISTORY_SELECT = `
+  SELECT s.*, u.full_name AS employee_name, c.name AS customer_name,
+         st.name AS store_name, st.code AS store_code
+  FROM sales s
+  JOIN users u ON u.id = s.user_id
+  JOIN stores st ON st.id = s.store_id
+  LEFT JOIN customers c ON c.id = s.customer_id`;
+
+function hydrateSales(
+  db: Db,
+  rows: Record<string, unknown>[],
+  viewer?: SaleHistoryViewer,
+): SaleHistoryEntry[] {
+  const itemsStmt = db.prepare(
+    "SELECT * FROM sale_items WHERE sale_id = ? ORDER BY rowid",
+  );
+  const hideCost = viewer?.role === "Empleado";
+  return rows.map((row) => {
+    const items = (itemsStmt.all(String(row.id)) as Record<string, unknown>[])
+      .map(mapSaleItem)
+      .map((item) => (hideCost ? { ...item, unitCost: null } : item));
+    const channel =
+      row.ticket_channel === "whatsapp" ||
+      row.ticket_channel === "email" ||
+      row.ticket_channel === "none"
+        ? row.ticket_channel
+        : null;
+    return {
+      ...mapSale(row),
+      employeeName: String(row.employee_name),
+      customerName: row.customer_name == null ? null : String(row.customer_name),
+      storeName: String(row.store_name),
+      storeCode: String(row.store_code),
+      hqEmailed: Number(row.hq_emailed ?? 0) === 1,
+      ticketPhone:
+        row.ticket_phone == null || row.ticket_phone === ""
+          ? null
+          : String(row.ticket_phone),
+      ticketChannel: channel,
+      items,
+    };
+  });
+}
+
+/** Historial de ventas con productos. Un empleado solo ve sus propias ventas. */
+export function listSalesHistory(
+  db: Db,
+  filters: SaleHistoryFilters = {},
+  options: { limit?: number; offset?: number; viewer?: SaleHistoryViewer } = {},
+): { sales: SaleHistoryEntry[]; total: number; limit: number; offset: number } {
+  const effective: SaleHistoryFilters = { ...filters };
+  if (options.viewer?.role === "Empleado") {
+    effective.userId = options.viewer.id;
+  }
+
+  const clauses: string[] = ["s.ticket_printed = 1"];
+  const params: unknown[] = [];
+  const add = (sql: string, value: unknown) => {
+    clauses.push(sql);
+    params.push(value);
+  };
+  if (effective.storeId) add("s.store_id = ?", effective.storeId);
+  if (effective.userId) add("s.user_id = ?", effective.userId);
+  if (effective.customerId) add("s.customer_id = ?", effective.customerId);
+  if (effective.from) add("s.created_at >= ?", effective.from);
+  if (effective.to) add("s.created_at <= ?", effective.to);
+  if (effective.paymentMethod) add("s.payment_method = ?", effective.paymentMethod);
+  if (effective.customerCategory) {
+    add("s.customer_category = ?", effective.customerCategory);
+  }
+  if (effective.saleType) add("s.sale_type = ?", effective.saleType);
+  if (effective.productId) {
+    add(
+      "EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = s.id AND si.product_id = ?)",
+      effective.productId,
+    );
+  }
+  const where = `WHERE ${clauses.join(" AND ")}`;
+
+  const limit = Math.min(Math.max(Math.trunc(options.limit ?? 100), 1), 500);
+  const offset = Math.max(Math.trunc(options.offset ?? 0), 0);
+
+  const total = (
+    db
+      .prepare(`SELECT COUNT(*) AS c FROM sales s ${where}`)
+      .get(...params) as { c: number }
+  ).c;
+
+  const rows = db
+    .prepare(
+      `${SALE_HISTORY_SELECT}
+       ${where}
+       ORDER BY s.created_at DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as Record<string, unknown>[];
+
+  return { sales: hydrateSales(db, rows, options.viewer), total, limit, offset };
+}
+
+/** Detalle de una venta (con ticket). Un empleado solo puede ver las propias. */
+export function getSaleDetail(
+  db: Db,
+  saleId: string,
+  viewer?: SaleHistoryViewer,
+): SaleHistoryEntry & { ticketText: string } {
+  const row = assertFound(
+    db
+      .prepare(`${SALE_HISTORY_SELECT} WHERE s.id = ?`)
+      .get(saleId) as Record<string, unknown> | undefined,
+    "Venta no encontrada",
+  );
+  if (viewer?.role === "Empleado" && String(row.user_id) !== viewer.id) {
+    throw new AppError("Solo puede ver sus propias ventas", 403, "FORBIDDEN");
+  }
+  const [sale] = hydrateSales(db, [row], viewer);
+  return {
+    ...sale,
+    ticketText: formatTicket({
+      storeName: sale.storeName,
+      storeCode: sale.storeCode,
+      folio: sale.folio,
+      date: sale.createdAt,
+      employee: sale.employeeName,
+      customer: sale.customerName,
+      saleType: sale.saleType,
+      customerCategory: sale.customerCategory,
+      paymentMethod: sale.paymentMethod,
+      email: row.ticket_email == null ? null : String(row.ticket_email),
+      phone: row.ticket_phone == null ? null : String(row.ticket_phone),
+      lines: sale.items.map((item) => ({
+        name: item.productName,
+        barcode: item.barcode,
+        price: item.finalPrice,
+      })),
+      subtotal: sale.subtotal,
+      discountTotal: sale.discountTotal,
+      total: sale.total,
+    }),
   };
 }
 
@@ -464,7 +691,7 @@ export type RecentTicket = {
   email: string | null;
   emailed: boolean;
   phone: string | null;
-  channel: "email" | "whatsapp";
+  channel: "email" | "whatsapp" | "none";
   delivered: boolean;
   storeName: string;
   ticketText: string;
@@ -506,8 +733,12 @@ export function listRecentTickets(
     }[];
     const email = row.ticket_email == null ? null : String(row.ticket_email);
     const phone = row.ticket_phone == null ? null : String(row.ticket_phone);
-    const channel: "email" | "whatsapp" =
-      row.ticket_channel === "whatsapp" ? "whatsapp" : "email";
+    const channel: "email" | "whatsapp" | "none" =
+      row.ticket_channel === "whatsapp"
+        ? "whatsapp"
+        : row.ticket_channel === "none"
+          ? "none"
+          : "email";
     const emailed = Number(row.ticket_emailed) === 1;
     return {
       folio: String(row.folio),

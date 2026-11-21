@@ -53,10 +53,12 @@ Abrir http://127.0.0.1:5000
 
 | Usuario | Contraseña | Rol / tienda |
 |---------|------------|--------------|
-| `admin` | `Admin#12` | Administrador (catálogo, precios, empleados, stock, categorías) |
+| `admin` | `Admin#123456` | Administrador (catálogo, precios, empleados, stock, categorías) |
 | `usuario` | `Venta#01` | Empleado Americas (POS, escaneo, ticket, inventario de su sucursal) |
+| `usuario1` | `Venta#02` | Empleado Henequen |
+| `usuario2` | `Venta#03` | Empleado Chihuahua |
 
-La contraseña es de exactamente 8 caracteres, con al menos un número y un carácter especial.
+La contraseña es de al menos 8 caracteres, con un número y un carácter especial.
 
 ### Consultar la BD SQLite
 

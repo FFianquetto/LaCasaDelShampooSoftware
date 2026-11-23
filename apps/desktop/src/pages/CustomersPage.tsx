@@ -158,6 +158,7 @@ export function CustomersPage() {
   const [stores, setStores] = useState<Store[]>([]);
   const [storeId, setStoreId] = useState("");
   const [search, setSearch] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
 
   // Alta
   const [name, setName] = useState("");
@@ -438,95 +439,118 @@ export function CustomersPage() {
       {success && <div className="success">{success}</div>}
       {isAdmin && (
         <div className="panel" style={{ marginBottom: "1rem" }}>
-          <div className="store-buttons" style={{ marginLeft: 0 }}>
-            {stores.map((item) => {
-              const active = item.id === storeId;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={active ? "btn" : "btn secondary"}
-                  onClick={() => setStoreId(active ? "" : item.id)}
-                >
-                  {shortStore(item.name)}
-                </button>
-              );
-            })}
+          <div className="filter-bar">
+            <div className="store-buttons store-buttons--equal" style={{ marginLeft: 0 }}>
+              {stores.map((item) => {
+                const active = item.id === storeId;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={active ? "btn" : "btn secondary"}
+                    onClick={() => setStoreId(active ? "" : item.id)}
+                  >
+                    {shortStore(item.name)}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              className={showCreate ? "btn" : "btn secondary"}
+              style={{ height: "var(--control-h)" }}
+              onClick={() => setShowCreate((open) => !open)}
+            >
+              {showCreate ? "Ocultar registro" : "Registrar cliente"}
+            </button>
           </div>
         </div>
       )}
-      <div className="panel" style={{ marginBottom: "1rem" }}>
-        <form className="form-inline" onSubmit={onCreate}>
-          <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-            <label>Nombre</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} required />
-          </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Categoría</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as CustomerCategory)}
-            >
-              {(Object.keys(CUSTOMER_CATEGORY_LABELS) as CustomerCategory[]).map(
-                (k) => (
-                  <option key={k} value={k}>
-                    {CUSTOMER_CATEGORY_LABELS[k]}
-                  </option>
-                ),
-              )}
-            </select>
-          </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Número de cliente</label>
-            {isAdmin ? (
-              <input
-                value={clientNumber}
-                placeholder={`Automático: ${nextNumber}`}
-                onChange={(e) => setClientNumber(e.target.value)}
-              />
-            ) : (
-              <input value={`Automático: ${nextNumber}`} readOnly />
-            )}
-          </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Teléfono</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </div>
-          <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-            <label>Correo</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-          <div className="form-row" style={{ marginBottom: 0, flex: 1.4 }}>
-            <label>Dirección</label>
-            <input value={address} onChange={(e) => setAddress(e.target.value)} />
-          </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Sucursal del cliente</label>
-            <input
-              value={branchName}
-              placeholder="Nombre de su sucursal"
-              onChange={(e) => setBranchName(e.target.value)}
-            />
-          </div>
-          {distributorForm && (
-            <RuleSelect
-              choice={ruleChoice}
-              custom={customDays}
-              onChoice={setRuleChoice}
-              onCustom={setCustomDays}
-            />
+      {(!isAdmin || showCreate) && (
+        <div className="panel" style={{ marginBottom: "1rem" }}>
+          {!isAdmin && (
+            <div className="filter-bar" style={{ marginBottom: "0.75rem" }}>
+              <h2 className="page-title" style={{ fontSize: "1.15rem", margin: 0, flex: 1 }}>
+                Registrar cliente
+              </h2>
+            </div>
           )}
-          <button className="btn" type="submit" disabled={!activeStoreId}>
-            Alta
-          </button>
-        </form>
-        {!isAdmin && isDistributorCategory(category) && (
-          <p className="page-sub" style={{ margin: "0.75rem 0 0" }}>
-            La regla de compra de las distribuidoras la define un administrador
-            (por defecto, una vez al mes).
-          </p>
-        )}
-      </div>
+          <form className="fields-grid-5" onSubmit={onCreate}>
+            <div className="form-row">
+              <label>Nombre</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+            <div className="form-row">
+              <label>Categoría</label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as CustomerCategory)}
+              >
+                {(Object.keys(CUSTOMER_CATEGORY_LABELS) as CustomerCategory[]).map(
+                  (k) => (
+                    <option key={k} value={k}>
+                      {CUSTOMER_CATEGORY_LABELS[k]}
+                    </option>
+                  ),
+                )}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>Número de cliente</label>
+              {isAdmin ? (
+                <input
+                  value={clientNumber}
+                  placeholder={`Automático: ${nextNumber}`}
+                  onChange={(e) => setClientNumber(e.target.value)}
+                />
+              ) : (
+                <input value={`Automático: ${nextNumber}`} readOnly />
+              )}
+            </div>
+            <div className="form-row">
+              <label>Teléfono</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </div>
+            <div className="form-row">
+              <label>Correo</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+            <div className="form-row">
+              <label>Dirección</label>
+              <input value={address} onChange={(e) => setAddress(e.target.value)} />
+            </div>
+            <div className="form-row">
+              <label>Sucursal del cliente</label>
+              <input
+                value={branchName}
+                placeholder="Nombre de su sucursal"
+                onChange={(e) => setBranchName(e.target.value)}
+              />
+            </div>
+            {distributorForm && (
+              <RuleSelect
+                choice={ruleChoice}
+                custom={customDays}
+                onChoice={setRuleChoice}
+                onCustom={setCustomDays}
+              />
+            )}
+            <button className="btn" type="submit" disabled={!activeStoreId}>
+              Alta
+            </button>
+          </form>
+          {!isAdmin && isDistributorCategory(category) && (
+            <p className="page-sub" style={{ margin: "0.75rem 0 0" }}>
+              La regla de compra de las distribuidoras la define un administrador
+              (por defecto, una vez al mes).
+            </p>
+          )}
+        </div>
+      )}
       <div className="panel table-wrap">
         <div className="form-row" style={{ marginBottom: "0.85rem" }}>
           <input

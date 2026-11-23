@@ -1,7 +1,15 @@
 import { FormEvent, useEffect, useState } from "react";
-import type { Store, User, UserRole } from "@lcds/shared";
+import {
+  PASSWORD_RULES_HINT,
+  passwordSchema,
+  type Store,
+  type User,
+  type UserRole,
+} from "@lcds/shared";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
+
+const PASSWORD_PATTERN = "(?=.*[A-Za-z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}";
 
 export function UsersPage() {
   const { user: me } = useAuth();
@@ -33,6 +41,11 @@ export function UsersPage() {
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const parsed = passwordSchema.safeParse(password);
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? PASSWORD_RULES_HINT);
+      return;
+    }
     try {
       await api("/users", {
         method: "POST",
@@ -96,8 +109,9 @@ export function UsersPage() {
               type="password"
               value={password}
               minLength={8}
-              pattern="(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}"
-              title="Al menos 8 caracteres, con un número y un carácter especial"
+              pattern={PASSWORD_PATTERN}
+              title={PASSWORD_RULES_HINT}
+              placeholder={PASSWORD_RULES_HINT}
               onChange={(e) => setPassword(e.target.value)}
               required
             />

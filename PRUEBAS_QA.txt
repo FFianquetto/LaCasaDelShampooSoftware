@@ -1,0 +1,60 @@
+LA CASA DEL SHAMPOO — PRUEBAS
+
+Accesos
+- Login admin y empleado
+- Empleado no ve Precios, Cuentas ni Reportes
+- Admin ve el alert de stock bajo (scroll, X, bloquea fondo)
+
+Clientes
+- Crear distribuidora con número C#### y regla cada 30 días
+- Venderle y ver frecuencia / próxima compra
+- Editar nombre, teléfono, correo, sucursal
+
+Ticket
+- Buscar producto por nombre (no solo ID)
+- Mayoreo / menudeo cambia precio bien
+- Cobrar efectivo, tarjeta, transferencia, saldo
+- Cerrar venta sin datos extra
+- Correo a lacasadelshampoo.torres@gmail.com (si aplica)
+
+Historial
+- Empleado ve solo sus ventas y su resumen del día
+- Admin filtra por empleado y sucursal
+
+Corte de caja
+- Empleado abre, mueve y cierra SU corte
+- No puede tocar el de otro
+- Admin revisa cortes por cuenta; filtra sucursal si hace falta
+- Cuadra efectivo / tarjeta / transferencia / saldo
+
+Inventario y stock
+- Editar stock solo por sucursal (Americas no afecta Chihuahua)
+- Empleado no puede editar stock
+- Total global = suma de sucursales
+
+Precios
+- Ver costo original y utilidad
+- Cambiar precio y costo con fecha de vigencia
+- Vista general y por marca
+
+Reportes (solo admin)
+- Resumen por día/mes y por empleado
+- Venta por producto
+- Utilidad (hoy / mes / general / sucursal)
+- Por empleado (desglose)
+- Inventario y bajo el mínimo
+
+Cuentas
+- Crear empleado atado a una sucursal
+- Esa cuenta solo opera su sucursal
+
+Utilidad / Excel
+- Costo del Excel se refleja en utilidad
+- Productos sin costo aparecen avisados
+
+Fotos pendientes (definir nombre de venta)
+- Jabón de café y extracto de algas
+- Crema de tomillo (ya tiene ficha)
+- Acondicionador de batana 500 ml (no existe en catálogo)
+- Crema despigmentante (no es dermawhite)
+- Barro negro con baba de caracol (no está en listado)

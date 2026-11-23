@@ -109,18 +109,18 @@ export function StockAlertModal() {
 
         <div className="stock-alert-body">
           <p className="page-sub">
-            Hay {data.count} producto{data.count === 1 ? "" : "s"} por debajo del
-            mínimo de su categoría. Revisa existencias por sucursal en Inventario.
+            {data.count} producto{data.count === 1 ? "" : "s"} bajo el mínimo.
+            Revisa en Inventario.
           </p>
 
           {data.byCategory.length > 0 && (
             <div className="notice" style={{ marginBottom: "0.85rem" }}>
               {data.byCategory.map((row) => (
-                <div key={row.category}>
-                  <strong>{row.category}</strong>: {row.products} producto
-                  {row.products === 1 ? "" : "s"} bajo el mínimo ({row.minimum}
-                  ). Lo más bajo: {row.worst} pieza
-                  {row.worst === 1 ? "" : "s"}.
+                <div key={row.category} style={{ marginBottom: "0.45rem" }}>
+                  <strong>{row.category}</strong>: {row.products} bajo el mínimo
+                  ({row.minimum})
+                  <br />
+                  Lo más bajo: {row.worst} pieza{row.worst === 1 ? "" : "s"}.
                 </div>
               ))}
             </div>

@@ -9,6 +9,7 @@ $env:LCDS_DATA_DIR = "$PWD\data"
 $env:LCDS_PRINT_MODE = "simulate"
 npm run dev:server
 
+
 http://127.0.0.1:5000/
 
 

@@ -11,7 +11,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  if (session) return <Navigate to={isAdmin ? "/pos" : "/ticket"} replace />;
+  if (session) return <Navigate to={isAdmin ? "/pos" : "/corte"} replace />;
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();

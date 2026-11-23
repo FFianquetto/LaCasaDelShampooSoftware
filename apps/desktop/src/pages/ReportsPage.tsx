@@ -23,7 +23,6 @@ import {
   defaultDateFrom,
   defaultDateTo,
   errMsg,
-  formatDate,
   formatDateTime,
   money,
   periodRange,
@@ -40,9 +39,7 @@ type Tab =
   | "categorias"
   | "tipo"
   | "pago"
-  | "empleados"
-  | "clientes"
-  | "inventario";
+  | "empleados";
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "resumen", label: "Resumen de ventas" },
@@ -52,8 +49,6 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "tipo", label: "Por tipo de cliente" },
   { key: "pago", label: "Por método de pago" },
   { key: "empleados", label: "Por empleado" },
-  { key: "clientes", label: "Por cliente" },
-  { key: "inventario", label: "Inventario" },
 ];
 
 type ProfitSnapshot = {
@@ -89,41 +84,6 @@ type ProfitReport = {
     name: string;
   }[];
   note: string;
-};
-
-type InventoryReport = {
-  Disponible: number;
-  Vendido: number;
-  byStore: {
-    storeId: string;
-    storeCode: string;
-    storeName: string;
-    disponible: number;
-    vendido: number;
-  }[];
-  products: {
-    id: string;
-    code: string | null;
-    name: string;
-    brand: string | null;
-    category: string | null;
-    disponible: number;
-    vendido: number;
-  }[];
-  lowStock: {
-    id: string;
-    code: string | null;
-    name: string;
-    disponible: number;
-    minimum?: number;
-  }[];
-  outOfStock: {
-    id: string;
-    code: string | null;
-    name: string;
-    disponible: number;
-    minimum?: number;
-  }[];
 };
 
 type Metrics = {
@@ -231,17 +191,6 @@ type EmployeesReport = {
   totals: Metrics;
 };
 
-type CustomersReport = {
-  customers: (Metrics & {
-    customerId: string | null;
-    customerName: string;
-    clientNumber: string | null;
-    customerCategory: CustomerCategory | null;
-    lastPurchaseAt: string | null;
-  })[];
-  totals: Metrics;
-};
-
 type CatalogHit = Product & { disponible: number };
 
 type Column<T> = {
@@ -320,13 +269,12 @@ function DataTable<T>({
   );
 }
 
+/** Columnas de ventas (sin costo/utilidad: eso va en la pestaña Utilidad). */
 function metricColumns<T extends Metrics>(totals?: Metrics): Column<T>[] {
   return [
     { label: "Tickets", render: (r) => r.tickets, total: totals?.tickets },
     { label: "Unidades", render: (r) => r.units, total: totals?.units },
     { label: "Ingresos", render: (r) => money(r.revenue), total: totals && money(totals.revenue) },
-    { label: "Costo", render: (r) => money(r.cost), total: totals && money(totals.cost) },
-    { label: "Utilidad", render: (r) => money(r.profit), total: totals && money(totals.profit) },
     {
       label: "Ticket prom.",
       render: (r) => money(r.avgTicket),
@@ -347,13 +295,12 @@ function BreakdownTable({ title, rows }: { title: string; rows: Breakdown[] }) {
             <th>Concepto</th>
             <th>Unid.</th>
             <th>Ingresos</th>
-            <th>Utilidad</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={4}>Sin datos.</td>
+              <td colSpan={3}>Sin datos.</td>
             </tr>
           ) : (
             rows.map((row) => (
@@ -361,7 +308,6 @@ function BreakdownTable({ title, rows }: { title: string; rows: Breakdown[] }) {
                 <td>{row.key}</td>
                 <td>{row.units}</td>
                 <td>{money(row.revenue)}</td>
-                <td>{money(row.profit)}</td>
               </tr>
             ))
           )}
@@ -392,7 +338,7 @@ export function ReportsPage() {
   const [productId, setProductId] = useState("");
   const [productHits, setProductHits] = useState<CatalogHit[]>([]);
 
-  const [sortBy, setSortBy] = useState<"profit" | "units" | "revenue">("profit");
+  const [sortBy, setSortBy] = useState<"units" | "revenue">("revenue");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [profitFocus, setProfitFocus] = useState<"day" | "month" | "all">("day");
 
@@ -463,17 +409,8 @@ export function ReportsPage() {
         tipo: "/reports/by-customer-category",
         pago: "/reports/by-payment",
         empleados: "/reports/employees",
-        clientes: "/reports/customers",
-        inventario: "/reports/inventory",
       };
       try {
-        if (tab === "inventario") {
-          const result = await api<unknown>(
-            `${path.inventario}?${qs({ storeId: activeStore })}`,
-          );
-          if (!cancelled) setData(result);
-          return;
-        }
         if (tab === "utilidad") {
           const result = await api<unknown>(
             `${path.utilidad}?${qs({ storeId: activeStore, userId: fUser })}`,
@@ -554,7 +491,6 @@ export function ReportsPage() {
 
   const sales = tab === "resumen" ? (data as SalesReport | null) : null;
   const productsReport = tab === "productos" ? (data as ProductsReport | null) : null;
-  const inventory = tab === "inventario" ? (data as InventoryReport | null) : null;
   const profit = tab === "utilidad" ? (data as ProfitReport | null) : null;
   const profitSnap =
     profit == null
@@ -574,17 +510,8 @@ export function ReportsPage() {
       <h1 className="page-title">Reportes</h1>
       <p className="page-sub">
         Hoy es {todayLabel}.{" "}
-        {tab === "inventario" ? (
-          <>
-            Inventario de <StoreName name={storeLabel} dot />
-          </>
-        ) : (
-          <>
-            {tab === "utilidad" ? "Utilidad" : "Ventas"} por cuenta (
-            {accountLabel}
-            ) · sucursal <StoreName name={storeLabel} dot />
-          </>
-        )}
+        {tab === "utilidad" ? "Utilidad" : "Ventas"} por cuenta ({accountLabel}) ·
+        sucursal <StoreName name={storeLabel} dot />
       </p>
       {error && <div className="error">{error}</div>}
 
@@ -602,71 +529,70 @@ export function ReportsPage() {
       </div>
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
-        <div className="catalog-toolbar" style={{ flexWrap: "wrap" }}>
-          {tab !== "inventario" && tab !== "utilidad" && (
-            <div className="store-buttons" style={{ marginLeft: 0 }}>
-              {(Object.keys(PERIOD_LABEL) as Period[]).map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={period === item ? "btn" : "btn secondary"}
-                  onClick={() => setPeriod(item)}
-                >
-                  {PERIOD_LABEL[item]}
-                </button>
-              ))}
-              <button
-                type="button"
-                className={period === "rango" ? "btn" : "btn secondary"}
-                onClick={() => setPeriod("rango")}
-              >
-                Rango
-              </button>
-            </div>
-          )}
-          {tab !== "inventario" && tab !== "utilidad" && period === "rango" && (
-            <>
-              <div style={{ flex: "0 0 auto", minWidth: "11rem" }}>
-                <DateInput
-                  value={fromDate}
-                  onChange={setFromDate}
-                  aria-label="Desde"
-                />
-              </div>
-              <div style={{ flex: "0 0 auto", minWidth: "11rem" }}>
-                <DateInput
-                  value={toDate}
-                  onChange={setToDate}
-                  aria-label="Hasta"
-                />
-              </div>
-            </>
-          )}
-          {isAdmin && (
-            <div className="store-buttons" style={{ marginLeft: 0 }}>
-              <span className="page-sub" style={{ margin: "0 0.35rem 0 0", alignSelf: "center" }}>
-                Sucursal
-              </span>
-              {stores.map((item) => {
-                const active = item.id === storeId;
-                return (
+        <div className="filter-bar">
+          <div className="filter-bar__left">
+            {tab !== "utilidad" && (
+              <div className="store-buttons store-buttons--equal" style={{ marginLeft: 0 }}>
+                {(Object.keys(PERIOD_LABEL) as Period[]).map((item) => (
                   <button
-                    key={item.id}
+                    key={item}
                     type="button"
-                    className={active ? "btn" : "btn secondary"}
-                    onClick={() => setStoreId(active ? "" : item.id)}
+                    className={period === item ? "btn" : "btn secondary"}
+                    onClick={() => setPeriod(item)}
                   >
-                    {shortStore(item.name)}
+                    {PERIOD_LABEL[item]}
                   </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {isAdmin && tab !== "inventario" && (
-          <div className="form-inline" style={{ marginTop: "0.85rem" }}>
-            <div className="form-row" style={{ marginBottom: 0, minWidth: "14rem" }}>
+                ))}
+                <button
+                  type="button"
+                  className={period === "rango" ? "btn" : "btn secondary"}
+                  onClick={() => setPeriod("rango")}
+                >
+                  Rango
+                </button>
+              </div>
+            )}
+            {tab !== "utilidad" && period === "rango" && (
+              <>
+                <div style={{ flex: "0 0 auto", minWidth: "11rem" }}>
+                  <DateInput
+                    value={fromDate}
+                    onChange={setFromDate}
+                    aria-label="Desde"
+                  />
+                </div>
+                <div style={{ flex: "0 0 auto", minWidth: "11rem" }}>
+                  <DateInput
+                    value={toDate}
+                    onChange={setToDate}
+                    aria-label="Hasta"
+                  />
+                </div>
+              </>
+            )}
+            {isAdmin && (
+              <div className="store-buttons store-buttons--equal" style={{ marginLeft: 0 }}>
+                <span className="page-sub" style={{ margin: "0 0.35rem 0 0", alignSelf: "center" }}>
+                  Sucursal
+                </span>
+                {stores.map((item) => {
+                  const active = item.id === storeId;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={active ? "btn" : "btn secondary"}
+                      onClick={() => setStoreId(active ? "" : item.id)}
+                    >
+                      {shortStore(item.name)}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {isAdmin && (
+            <div className="form-row select-field filter-bar__right" style={{ marginBottom: 0, minWidth: "14rem" }}>
               <label>Empleado / cuenta</label>
               <select value={fUser} onChange={(e) => setFUser(e.target.value)}>
                 <option value="">Todas las cuentas</option>
@@ -678,10 +604,10 @@ export function ReportsPage() {
                 ))}
               </select>
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
-        {tab !== "resumen" && tab !== "inventario" && tab !== "utilidad" && (
+        {tab !== "resumen" && tab !== "utilidad" && (
           <div className="form-inline" style={{ marginTop: "0.85rem" }}>
             <div className="form-row" style={{ marginBottom: 0 }}>
               <label>Categoría de producto</label>
@@ -775,15 +701,7 @@ export function ReportsPage() {
 
       {sales && (
         <>
-          <div
-            className="stats"
-            style={{
-              gridTemplateColumns:
-                sales.totals.profit != null
-                  ? "repeat(4, 1fr)"
-                  : "repeat(3, 1fr)",
-            }}
-          >
+          <div className="stats" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
             <div className="stat">
               Ventas
               <strong>{sales.totals.salesCount}</strong>
@@ -796,88 +714,11 @@ export function ReportsPage() {
               Ingresos
               <strong>{money(sales.totals.revenue)}</strong>
             </div>
-            {sales.totals.profit != null && (
-              <div className="stat">
-                Utilidad
-                <strong>{money(sales.totals.profit)}</strong>
-                <span>
-                  Costo {money(sales.totals.cost ?? 0)} · ver pestaña Utilidad
-                </span>
-              </div>
-            )}
           </div>
-
-          {sales.cashCut && (
-            <div className="panel" style={{ marginBottom: "1rem" }}>
-              <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-                Totales por método de pago {periodWord}
-              </h2>
-              <p className="page-sub">
-                Resumen de ventas del periodo (no sustituye el corte de caja de
-                cada cuenta). Efectivo = caja · Tarjeta = terminal ·
-                Transferencia = banco · Saldo = crédito.
-              </p>
-              <div className="stats" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-                <div className="stat">
-                  Efectivo en caja
-                  <strong>{money(sales.cashCut.efectivo)}</strong>
-                  <span>{sales.cashCut.counts.efectivo} ventas</span>
-                </div>
-                <div className="stat">
-                  Tarjeta en terminal
-                  <strong>{money(sales.cashCut.tarjeta)}</strong>
-                  <span>{sales.cashCut.counts.tarjeta} ventas</span>
-                </div>
-                <div className="stat">
-                  Transferencia
-                  <strong>{money(sales.cashCut.transferencia)}</strong>
-                  <span>{sales.cashCut.counts.transferencia} ventas</span>
-                </div>
-                <div className="stat">
-                  Saldo
-                  <strong>{money(sales.cashCut.salesCredit)}</strong>
-                  <span>{sales.cashCut.counts.salesCredit} ventas</span>
-                </div>
-              </div>
-              {sales.cashCut.sinMetodo > 0 && (
-                <p className="notice">
-                  Hay {money(sales.cashCut.sinMetodo)} en ventas sin método de pago. No
-                  se suman a la caja ni a la terminal.
-                </p>
-              )}
-              {sales.cashCut.byStore.length > 1 && (
-                <div className="table-wrap">
-                  <p className="page-sub" style={{ marginTop: 0 }}>
-                    El efectivo de cada sucursal se cuenta por separado.
-                  </p>
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Sucursal</th>
-                        <th>Efectivo</th>
-                        <th>Tarjeta</th>
-                        <th>Transferencia</th>
-                        <th>Saldo</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sales.cashCut.byStore.map((row) => (
-                        <tr key={row.storeCode}>
-                          <td>
-                            <StoreName name={shortStore(row.storeName)} />
-                          </td>
-                          <td>{money(row.efectivo)}</td>
-                          <td>{money(row.tarjeta)}</td>
-                          <td>{money(row.transferencia)}</td>
-                          <td>{money(row.salesCredit)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
+          <p className="page-sub" style={{ marginTop: 0 }}>
+            Utilidad y costos están en la pestaña Utilidad. Desglose por pago en
+            Por método de pago.
+          </p>
 
           <div className="panel table-wrap">
             <table>
@@ -924,7 +765,7 @@ export function ReportsPage() {
 
       {productsReport && (
         <>
-          <div className="stats" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+          <div className="stats" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
             <div className="stat">
               Unidades
               <strong>{productsReport.totals.units}</strong>
@@ -934,14 +775,6 @@ export function ReportsPage() {
               Ingresos
               <strong>{money(productsReport.totals.revenue)}</strong>
             </div>
-            <div className="stat">
-              Costo
-              <strong>{money(productsReport.totals.cost)}</strong>
-            </div>
-            <div className="stat">
-              Utilidad
-              <strong>{money(productsReport.totals.profit)}</strong>
-            </div>
           </div>
           <div className="panel table-wrap">
             <div className="store-buttons" style={{ margin: "0 0 1rem" }}>
@@ -950,9 +783,8 @@ export function ReportsPage() {
               </span>
               {(
                 [
-                  ["profit", "Utilidad"],
-                  ["units", "Unidades"],
                   ["revenue", "Ingresos"],
+                  ["units", "Unidades"],
                 ] as const
               ).map(([key, label]) => (
                 <button
@@ -976,8 +808,6 @@ export function ReportsPage() {
                 { label: "Unidades", render: (r) => r.units, total: productsReport.totals.units },
                 { label: "Precio prom.", render: (r) => money(r.avgPrice), total: "" },
                 { label: "Ingresos", render: (r) => money(r.revenue), total: money(productsReport.totals.revenue) },
-                { label: "Costo", render: (r) => money(r.cost), total: money(productsReport.totals.cost) },
-                { label: "Utilidad", render: (r) => money(r.profit), total: money(productsReport.totals.profit) },
               ]}
             />
           </div>
@@ -1094,290 +924,97 @@ export function ReportsPage() {
         </div>
       )}
 
-      {tab === "clientes" && data != null && (
-        <div className="panel table-wrap">
-          {(() => {
-            const report = data as CustomersReport;
-            return (
-              <DataTable
-                rows={report.customers}
-                rowKey={(r) => r.customerId ?? "mostrador"}
-                empty="Sin ventas con estos filtros."
-                columns={[
-                  { label: "Cliente", render: (r) => r.customerName },
-                  { label: "Número", render: (r) => r.clientNumber ?? "—" },
-                  {
-                    label: "Tipo",
-                    render: (r) =>
-                      r.customerCategory ? CUSTOMER_CATEGORY_LABELS[r.customerCategory] : "—",
-                  },
-                  { label: "Última compra", render: (r) => formatDate(r.lastPurchaseAt) },
-                  ...metricColumns<CustomersReport["customers"][number]>(report.totals),
-                ]}
-              />
-            );
-          })()}
-        </div>
-      )}
-
-      {profit && (
-        <>
-          <p className="page-sub" style={{ marginTop: 0 }}>
-            {profit.note} Costo tomado del Excel (columna COSTO).
-          </p>
-          <div className="stats" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-            {(
-              [
-                ["day", "Hoy", profit.day],
-                ["month", "Este mes", profit.month],
-                ["all", "General", profit.all],
-              ] as const
-            ).map(([key, label, snap]) => (
-              <button
-                key={key}
-                type="button"
-                className="stat"
-                style={{
-                  textAlign: "left",
-                  cursor: "pointer",
-                  border:
-                    profitFocus === key
-                      ? "2px solid var(--accent, #1f4d3a)"
-                      : undefined,
-                }}
-                onClick={() => setProfitFocus(key)}
-              >
-                {label}
-                <strong>{money(snap.profit)}</strong>
-                <span>
-                  Ingresos {money(snap.revenue)} · Costo {money(snap.cost)} ·{" "}
-                  Margen {snap.margin.toFixed(1)}%
-                </span>
-              </button>
-            ))}
+      {profit && profitSnap && (
+        <div className="panel history-summary" style={{ marginBottom: "1rem" }}>
+          <div className="filter-bar" style={{ marginBottom: "0.85rem" }}>
+            <div className="store-buttons store-buttons--equal" style={{ marginLeft: 0 }}>
+              {(
+                [
+                  ["day", "Hoy", profit.day.profit],
+                  ["month", "Este mes", profit.month.profit],
+                  ["all", "General", profit.all.profit],
+                ] as const
+              ).map(([key, label, amount]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={profitFocus === key ? "btn" : "btn secondary"}
+                  onClick={() => setProfitFocus(key)}
+                >
+                  {label}
+                  <span style={{ opacity: 0.85, fontWeight: 600 }}>
+                    {" "}
+                    · {money(amount)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="page-sub" style={{ margin: 0 }}>
+              Precio cobrado − COSTO del Excel.
+            </p>
           </div>
 
-          {profitSnap && (
-            <>
-              <div className="stats" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-                <div className="stat">
-                  Tickets
-                  <strong>{profitSnap.tickets}</strong>
-                </div>
-                <div className="stat">
-                  Unidades
-                  <strong>{profitSnap.units}</strong>
-                </div>
-                <div className="stat">
-                  Ingresos
-                  <strong>{money(profitSnap.revenue)}</strong>
-                </div>
-                <div className="stat">
-                  Utilidad
-                  <strong>{money(profitSnap.profit)}</strong>
-                  <span>Costo {money(profitSnap.cost)}</span>
-                </div>
-              </div>
+          <div className="stats" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+            <div className="stat" style={{ borderColor: "var(--brand, #5c6b3a)" }}>
+              Utilidad
+              <strong style={{ fontSize: "1.75rem" }}>{money(profitSnap.profit)}</strong>
+              <span>
+                Margen {profitSnap.margin.toFixed(1)}% · {profitSnap.tickets}{" "}
+                tickets · {profitSnap.units} u.
+              </span>
+            </div>
+            <div className="stat">
+              Ingresos
+              <strong>{money(profitSnap.revenue)}</strong>
+              <span>Total cobrado en el periodo</span>
+            </div>
+            <div className="stat">
+              Costo
+              <strong>{money(profitSnap.cost)}</strong>
+              <span>Congelado al vender (Excel)</span>
+            </div>
+          </div>
 
-              <div className="panel table-wrap" style={{ marginBottom: "1rem" }}>
-                <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-                  Por sucursal —{" "}
-                  {profitFocus === "day"
-                    ? "hoy"
-                    : profitFocus === "month"
-                      ? "este mes"
-                      : "general"}
-                </h2>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Sucursal</th>
-                      <th>Tickets</th>
-                      <th>Unidades</th>
-                      <th>Ingresos</th>
-                      <th>Costo</th>
-                      <th>Utilidad</th>
-                      <th>Margen</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {profitSnap.byStore.map((row) => (
+          {profitSnap.byStore.filter((row) => row.tickets > 0 || row.revenue > 0)
+            .length > 1 && (
+            <div className="table-wrap" style={{ marginTop: "0.35rem" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Sucursal</th>
+                    <th>Ingresos</th>
+                    <th>Costo</th>
+                    <th>Utilidad</th>
+                    <th>Margen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {profitSnap.byStore
+                    .filter((row) => row.tickets > 0 || row.revenue > 0)
+                    .map((row) => (
                       <tr key={row.storeId}>
                         <td>
                           {row.storeCode} — {shortStore(row.storeName)}
                         </td>
-                        <td>{row.tickets}</td>
-                        <td>{row.units}</td>
                         <td>{money(row.revenue)}</td>
                         <td>{money(row.cost)}</td>
                         <td>{money(row.profit)}</td>
                         <td>{row.margin.toFixed(1)}%</td>
                       </tr>
                     ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>Total</td>
-                      <td>{profitSnap.tickets}</td>
-                      <td>{profitSnap.units}</td>
-                      <td>{money(profitSnap.revenue)}</td>
-                      <td>{money(profitSnap.cost)}</td>
-                      <td>{money(profitSnap.profit)}</td>
-                      <td>{profitSnap.margin.toFixed(1)}%</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </>
-          )}
-
-          {profit.missingCostProducts.length > 0 && (
-            <div className="panel table-wrap">
-              <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-                Sin costo en Excel
-              </h2>
-              <p className="notice">
-                Estos {profit.missingCostProducts.length} productos no tienen
-                COSTO en el Excel; su utilidad se calcula como si el costo fuera
-                $0 hasta que se capture.
-              </p>
-              <DataTable
-                rows={profit.missingCostProducts}
-                rowKey={(r) => `${r.code ?? r.name}`}
-                empty="Todos los productos tienen costo."
-                columns={[
-                  { label: "Código", render: (r) => r.code ?? "—" },
-                  { label: "Marca", render: (r) => r.brand ?? "—" },
-                  { label: "Producto", render: (r) => r.name },
-                ]}
-              />
-            </div>
-          )}
-        </>
-      )}
-
-      {inventory && (
-        <>
-          <div className="stats">
-            <div className="stat">
-              Disponibles
-              <strong>{inventory.Disponible}</strong>
-            </div>
-            <div className="stat">
-              Vendidos
-              <strong>{inventory.Vendido}</strong>
-            </div>
-            <div className="stat">
-              Bajo el mínimo
-              <strong>{inventory.lowStock.length}</strong>
-            </div>
-            <div className="stat">
-              Sin existencia
-              <strong>{inventory.outOfStock.length}</strong>
-            </div>
-          </div>
-
-          {inventory.byStore.length > 0 && (
-            <div className="panel table-wrap" style={{ marginBottom: "1rem" }}>
-              <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-                Por sucursal
-              </h2>
-              <p className="page-sub">
-                El stock global es la suma de Americas, Chihuahua y Henequen.
-              </p>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Sucursal</th>
-                    <th>Disponibles</th>
-                    <th>Vendidos</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {inventory.byStore.map((row) => (
-                    <tr key={row.storeId}>
-                      <td>
-                        {row.storeCode} — {shortStore(row.storeName)}
-                      </td>
-                      <td>
-                        <span
-                          className={
-                            row.disponible > 0 ? "stock-ok" : "stock-out"
-                          }
-                        >
-                          {row.disponible}
-                        </span>
-                      </td>
-                      <td>{row.vendido}</td>
-                    </tr>
-                  ))}
                 </tbody>
               </table>
             </div>
           )}
 
-          {inventory.lowStock.length > 0 && (
-            <div className="panel table-wrap" style={{ marginBottom: "1rem" }}>
-              <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-                Bajo el mínimo por categoría
-              </h2>
-              <DataTable
-                rows={inventory.lowStock}
-                rowKey={(r) => r.id}
-                empty="Ningún producto bajo el mínimo."
-                columns={[
-                  { label: "Código", render: (r) => r.code ?? "—" },
-                  { label: "Producto", render: (r) => r.name },
-                  {
-                    label: "Disponibles",
-                    render: (r) => (
-                      <span className="stock-out">{r.disponible}</span>
-                    ),
-                  },
-                  {
-                    label: "Mínimo",
-                    render: (r) => r.minimum ?? "—",
-                  },
-                ]}
-              />
-            </div>
+          {profit.missingCostProducts.length > 0 && (
+            <p className="notice" style={{ margin: "0.85rem 0 0" }}>
+              {profit.missingCostProducts.length} productos activos sin COSTO en
+              Excel (su utilidad sale como si el costo fuera $0). Revisa Precios
+              o vuelve a importar el Excel.
+            </p>
           )}
-
-          <div className="panel table-wrap">
-            <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-              Productos
-            </h2>
-            <DataTable
-              rows={inventory.products}
-              rowKey={(r) => r.id}
-              empty="Sin productos con movimiento de inventario."
-              columns={[
-                { label: "Código", render: (r) => r.code ?? "—" },
-                { label: "Producto", render: (r) => r.name },
-                { label: "Marca", render: (r) => r.brand ?? "—" },
-                { label: "Categoría", render: (r) => r.category ?? "—" },
-                {
-                  label: "Disponibles",
-                  render: (r) => (
-                    <span
-                      className={
-                        r.disponible > 0 ? "stock-ok" : "stock-out"
-                      }
-                    >
-                      {r.disponible}
-                    </span>
-                  ),
-                  total: inventory.Disponible,
-                },
-                {
-                  label: "Vendidos",
-                  render: (r) => r.vendido,
-                  total: inventory.Vendido,
-                },
-              ]}
-            />
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

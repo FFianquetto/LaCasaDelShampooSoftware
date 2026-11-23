@@ -141,12 +141,16 @@ export const saleSchema = z.object({
 });
 export type Sale = z.infer<typeof saleSchema>;
 
-/** Al menos 8 caracteres, un número y un carácter especial. */
+/** Al menos 8 caracteres, una letra, un número y un carácter especial. */
 export const passwordSchema = z
   .string()
   .min(8, "La contraseña debe tener al menos 8 caracteres")
+  .regex(/[A-Za-z]/, "Debe incluir al menos una letra")
   .regex(/\d/, "Debe incluir al menos un número")
   .regex(/[^A-Za-z0-9]/, "Debe incluir al menos un carácter especial");
+
+export const PASSWORD_RULES_HINT =
+  "Mínimo 8 caracteres, con letra, número y un signo (ej. # ! @)";
 
 export const loginRequestSchema = z.object({
   username: z.string().min(1),

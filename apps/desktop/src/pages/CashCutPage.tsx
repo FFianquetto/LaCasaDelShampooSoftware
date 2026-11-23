@@ -7,6 +7,8 @@ import type {
 } from "@lcds/shared";
 import { api } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { ConfirmModal } from "../components/ConfirmModal";
+import { SelectField } from "../components/SelectField";
 import { StoreName } from "../StoreName";
 import { DateInput } from "../DateInput";
 import { MoneyInput, parseMoneyInput } from "../MoneyInput";
@@ -74,10 +76,10 @@ type CashCutDetail = CashCutPreview & {
 };
 
 const MOVEMENT_TYPES: { value: CashMovementType; label: string }[] = [
-  { value: "Entrada", label: "Entrada (suma a caja)" },
-  { value: "Fondo", label: "Fondo (suma a caja)" },
-  { value: "Salida", label: "Salida (resta de caja)" },
-  { value: "Retiro", label: "Retiro (resta de caja)" },
+  { value: "Entrada", label: "Entrada" },
+  { value: "Fondo", label: "Fondo" },
+  { value: "Salida", label: "Salida" },
+  { value: "Retiro", label: "Retiro" },
 ];
 
 function differenceBadge(value: number | null | undefined) {
@@ -98,23 +100,28 @@ function PreviewBlock({ data }: { data: CashCutPreview }) {
       : data.expectedCash;
   return (
     <>
-      <div className="stats" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      <div className="stats" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         <div className="stat">
-          Efectivo
-          <strong>{money(data.byPayment.efectivo)}</strong>
+          Debe haber en caja
+          <strong>{money(expected)}</strong>
         </div>
         <div className="stat">
-          Tarjeta
-          <strong>{money(data.byPayment.tarjeta)}</strong>
+          Ventas
+          <strong>{data.salesCount}</strong>
+          <span>{money(data.salesTotal)}</span>
         </div>
         <div className="stat">
-          Transferencia
-          <strong>{money(data.byPayment.transferencia)}</strong>
-        </div>
-        <div className="stat">
-          Saldo
-          <strong>{money(data.byPayment.saldo)}</strong>
-          <span>No entra a caja</span>
+          Por método
+          <strong style={{ fontSize: "1rem", fontWeight: 600 }}>
+            Ef. {money(data.byPayment.efectivo)}
+          </strong>
+          <span>
+            Tarjeta {money(data.byPayment.tarjeta)} · Transf.{" "}
+            {money(data.byPayment.transferencia)}
+            {data.byPayment.saldo > 0
+              ? ` · Saldo ${money(data.byPayment.saldo)}`
+              : ""}
+          </span>
         </div>
       </div>
       {data.byPayment.sinMetodo > 0 && (
@@ -122,11 +129,6 @@ function PreviewBlock({ data }: { data: CashCutPreview }) {
           Hay {money(data.byPayment.sinMetodo)} en ventas sin método de pago.
         </p>
       )}
-      <div className="notice">
-        <strong>Efectivo esperado en caja: {money(expected)}</strong>
-        <br />
-        {data.salesCount} ventas · total vendido {money(data.salesTotal)}
-      </div>
     </>
   );
 }
@@ -226,6 +228,8 @@ export function CashCutPage() {
   const [countedCash, setCountedCash] = useState("");
   const [closeNotes, setCloseNotes] = useState("");
   const [closed, setClosed] = useState<CashCutPreview | null>(null);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const [pendingCounted, setPendingCounted] = useState<number | null>(null);
 
   const [cuts, setCuts] = useState<CashCut[]>([]);
   const [fStore, setFStore] = useState("");
@@ -357,7 +361,7 @@ export function CashCutPage() {
     }
   }
 
-  async function onClose(event: FormEvent) {
+  function onClose(event: FormEvent) {
     event.preventDefault();
     if (!current) return;
     const counted = parseMoneyInput(countedCash);
@@ -365,13 +369,13 @@ export function CashCutPage() {
       setError("Escribe el efectivo contado en caja");
       return;
     }
-    if (
-      !window.confirm(
-        "¿Cerrar el corte con este efectivo contado? Después solo un administrador puede corregirlo.",
-      )
-    ) {
-      return;
-    }
+    setError(null);
+    setPendingCounted(counted);
+    setCloseConfirmOpen(true);
+  }
+
+  async function confirmCloseCut() {
+    if (!current || pendingCounted == null) return;
     setBusy(true);
     setError(null);
     setSuccess(null);
@@ -381,7 +385,7 @@ export function CashCutPage() {
         {
           method: "POST",
           body: JSON.stringify({
-            countedCash: counted,
+            countedCash: pendingCounted,
             notes: closeNotes.trim() || undefined,
           }),
         },
@@ -389,9 +393,12 @@ export function CashCutPage() {
       setClosed(result);
       setCountedCash("");
       setCloseNotes("");
+      setCloseConfirmOpen(false);
+      setPendingCounted(null);
       await Promise.all([loadCurrent(), loadList()]);
     } catch (err) {
       setError(errMsg(err, "No se pudo cerrar el corte"));
+      setCloseConfirmOpen(false);
     } finally {
       setBusy(false);
     }
@@ -420,16 +427,15 @@ export function CashCutPage() {
     <div>
       <h1 className="page-title">Corte de caja</h1>
       <p className="page-sub">
-        Cada cuenta sube su propio corte. Empleados quedan atados a una sucursal;
-        el admin puede filtrar por sucursal si la misma persona trabaja en más de
-        una. Ahora:{" "}
         {viewingOther ? (
           <>
-            revisando a <strong>{reviewUser?.fullName ?? "empleado"}</strong>
+            Revisando a <strong>{reviewUser?.fullName ?? "empleado"}</strong> (solo
+            lectura).
           </>
         ) : (
           <>
-            tu corte en <StoreName name={storeLabel} dot />
+            1) Abre · 2) Vende · 3) Cuenta el efectivo y cierra. Ahora:{" "}
+            <StoreName name={storeLabel} dot />
           </>
         )}
       </p>
@@ -438,47 +444,41 @@ export function CashCutPage() {
 
       {isAdmin && (
         <div className="panel" style={{ marginBottom: "1rem" }}>
-          <div className="form-inline" style={{ marginBottom: "0.75rem" }}>
-            <div className="form-row" style={{ marginBottom: 0, minWidth: "14rem" }}>
-              <label>Cuenta / empleado</label>
-              <select
-                value={reviewUserId}
-                onChange={(e) => {
-                  setReviewUserId(e.target.value);
-                  setClosed(null);
-                  setLoading(true);
-                }}
-              >
-                <option value="">Mi corte</option>
-                {users
-                  .filter((item) => item.active && item.id !== user?.id)
-                  .map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.fullName} ({item.role})
-                    </option>
-                  ))}
-              </select>
-            </div>
+          <div className="form-inline">
+            <SelectField
+              label="Ver cuenta"
+              value={reviewUserId}
+              onChange={(value) => {
+                setReviewUserId(value);
+                setClosed(null);
+                setLoading(true);
+              }}
+              style={{ minWidth: "14rem" }}
+            >
+              <option value="">Mi corte</option>
+              {users
+                .filter((item) => item.active && item.id !== user?.id)
+                .map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.fullName}
+                  </option>
+                ))}
+            </SelectField>
+            {!viewingOther && (
+              <div className="store-buttons" style={{ marginLeft: 0 }}>
+                {stores.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={item.id === storeId ? "btn" : "btn secondary"}
+                    onClick={() => setStoreId(item.id)}
+                  >
+                    {shortStore(item.name)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          {!viewingOther && (
-            <div className="store-buttons" style={{ marginLeft: 0 }}>
-              {stores.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={item.id === storeId ? "btn" : "btn secondary"}
-                  onClick={() => setStoreId(item.id)}
-                >
-                  {shortStore(item.name)}
-                </button>
-              ))}
-            </div>
-          )}
-          {viewingOther && (
-            <p className="notice" style={{ marginBottom: 0 }}>
-              Solo lectura: no puedes mover ni cerrar el corte de otra cuenta.
-            </p>
-          )}
         </div>
       )}
 
@@ -489,163 +489,161 @@ export function CashCutPage() {
           </p>
         </div>
       ) : current ? (
-        <>
-          <div className="panel" style={{ marginBottom: "1rem" }}>
-            <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-              Corte abierto
-            </h2>
-            <p className="page-sub">
-              Abierto el {formatDateTime(current.cut.openedAt)} · apertura{" "}
-              {money(current.cut.openingCash)}
-              {current.cut.notes ? ` · ${current.cut.notes}` : ""}
-            </p>
-            <PreviewBlock data={current} />
-            <MovementsTable movements={current.movements} />
-          </div>
+        <div className="panel" style={{ marginBottom: "1rem" }}>
+          <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
+            Corte abierto
+          </h2>
+          <p className="page-sub">
+            Desde {formatDateTime(current.cut.openedAt)} · inició con{" "}
+            {money(current.cut.openingCash)}
+            {current.cut.notes ? ` · ${current.cut.notes}` : ""}
+          </p>
+          <PreviewBlock data={current} />
+
+          <h3 className="detail-title">Movimientos de caja</h3>
+          <MovementsTable movements={current.movements} />
 
           {!viewingOther && (
             <>
-              <div className="panel" style={{ marginBottom: "1rem" }}>
-                <h2 className="page-title" style={{ fontSize: "1.2rem" }}>
-                  Agregar movimiento
-                </h2>
-                <form className="form-inline" onSubmit={onMovement}>
-                  <div className="form-row" style={{ marginBottom: 0 }}>
-                    <label>Tipo</label>
-                    <select
-                      value={moveType}
-                      onChange={(e) =>
-                        setMoveType(e.target.value as CashMovementType)
-                      }
-                    >
-                      {MOVEMENT_TYPES.map((item) => (
-                        <option key={item.value} value={item.value}>
-                          {item.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-row" style={{ marginBottom: 0 }}>
-                    <label>Monto</label>
-                    <MoneyInput
-                      value={moveAmount}
-                      onChange={setMoveAmount}
-                      required
-                      aria-label="Monto"
-                    />
-                  </div>
-                  <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-                    <label>Motivo</label>
-                    <input
-                      value={moveReason}
-                      maxLength={200}
-                      onChange={(e) => setMoveReason(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <button className="btn" type="submit" disabled={busy}>
-                    Agregar
-                  </button>
-                </form>
-              </div>
+              <form
+                className="form-inline"
+                style={{ marginTop: "0.85rem" }}
+                onSubmit={onMovement}
+              >
+                <SelectField
+                  label="Tipo"
+                  value={moveType}
+                  onChange={(value) => setMoveType(value as CashMovementType)}
+                >
+                  {MOVEMENT_TYPES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </SelectField>
+                <div className="form-row" style={{ marginBottom: 0 }}>
+                  <label>Monto</label>
+                  <MoneyInput
+                    value={moveAmount}
+                    onChange={setMoveAmount}
+                    required
+                    aria-label="Monto"
+                  />
+                </div>
+                <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
+                  <label>Motivo</label>
+                  <input
+                    value={moveReason}
+                    maxLength={200}
+                    placeholder="Ej. cambio, retiro a oficina…"
+                    onChange={(e) => setMoveReason(e.target.value)}
+                    required
+                  />
+                </div>
+                <button className="btn" type="submit" disabled={busy}>
+                  Agregar
+                </button>
+              </form>
 
-              <div className="panel" style={{ marginBottom: "1rem" }}>
-                <h2 className="page-title" style={{ fontSize: "1.2rem" }}>
-                  Cerrar corte
-                </h2>
-                <p className="page-sub">
-                  Cuenta el efectivo que hay en caja. Esperado:{" "}
-                  <strong>{money(current.expectedCash)}</strong>
+              <hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: "1.1rem 0" }} />
+
+              <h3 className="detail-title" style={{ marginTop: 0 }}>
+                Cerrar: cuenta lo que hay en caja
+              </h3>
+              <p className="page-sub">
+                Debe haber <strong>{money(current.expectedCash)}</strong>. Escribe lo
+                que contaste.
+              </p>
+              <form className="form-inline" onSubmit={onClose}>
+                <div className="form-row" style={{ marginBottom: 0 }}>
+                  <label>Efectivo contado</label>
+                  <MoneyInput
+                    value={countedCash}
+                    onChange={setCountedCash}
+                    required
+                    aria-label="Efectivo contado"
+                  />
+                </div>
+                <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
+                  <label>Nota (opcional)</label>
+                  <input
+                    value={closeNotes}
+                    onChange={(e) => setCloseNotes(e.target.value)}
+                  />
+                </div>
+                <button className="btn accent" type="submit" disabled={busy}>
+                  {busy ? "Cerrando…" : "Cerrar corte"}
+                </button>
+              </form>
+              {parseMoneyInput(countedCash) != null && (
+                <p className="report-total">
+                  Diferencia:{" "}
+                  {money(
+                    (parseMoneyInput(countedCash) ?? 0) - current.expectedCash,
+                  )}{" "}
+                  {differenceBadge(
+                    (parseMoneyInput(countedCash) ?? 0) - current.expectedCash,
+                  )}
                 </p>
-                <form className="form-inline" onSubmit={onClose}>
-                  <div className="form-row" style={{ marginBottom: 0 }}>
-                    <label>Efectivo contado</label>
-                    <MoneyInput
-                      value={countedCash}
-                      onChange={setCountedCash}
-                      required
-                      aria-label="Efectivo contado"
-                    />
-                  </div>
-                  <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-                    <label>Notas</label>
-                    <input
-                      value={closeNotes}
-                      onChange={(e) => setCloseNotes(e.target.value)}
-                    />
-                  </div>
-                  <button className="btn accent" type="submit" disabled={busy}>
-                    {busy ? "Cerrando…" : "Cerrar corte"}
-                  </button>
-                </form>
-                {parseMoneyInput(countedCash) != null && (
-                  <p className="report-total">
-                    Diferencia estimada:{" "}
-                    {money(
-                      (parseMoneyInput(countedCash) ?? 0) - current.expectedCash,
-                    )}
-                  </p>
-                )}
-              </div>
+              )}
             </>
           )}
-        </>
+        </div>
       ) : (
         <>
+          {!viewingOther && (
+            <div className="panel" style={{ marginBottom: "1rem" }}>
+              <h2 className="page-title" style={{ fontSize: "1.2rem" }}>
+                Abrir corte
+              </h2>
+              <p className="page-sub">
+                Pon cuánto efectivo hay al empezar el turno.
+              </p>
+              <form className="form-inline" onSubmit={onOpen}>
+                <div className="form-row" style={{ marginBottom: 0 }}>
+                  <label>Efectivo inicial</label>
+                  <MoneyInput
+                    value={openingCash}
+                    onChange={setOpeningCash}
+                    required
+                    aria-label="Efectivo inicial"
+                  />
+                </div>
+                <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
+                  <label>Nota (opcional)</label>
+                  <input
+                    value={openNotes}
+                    onChange={(e) => setOpenNotes(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn"
+                  type="submit"
+                  disabled={busy || !activeStoreId}
+                >
+                  Abrir corte
+                </button>
+              </form>
+            </div>
+          )}
           {closed && !viewingOther && (
             <div className="panel" style={{ marginBottom: "1rem" }}>
               <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-                Corte cerrado
+                Listo, corte cerrado
               </h2>
-              <p className="page-sub">
-                Contado {money(closed.cut.countedCash)} · esperado{" "}
-                {money(closed.cut.expectedCash ?? closed.expectedCash)}
-              </p>
               <p className="report-total" style={{ marginTop: 0 }}>
-                Diferencia: {money(closed.cut.difference)}{" "}
+                Contado {money(closed.cut.countedCash)} · debía haber{" "}
+                {money(closed.cut.expectedCash ?? closed.expectedCash)} ·{" "}
                 {differenceBadge(closed.cut.difference)}
               </p>
               <PreviewBlock data={closed} />
               <MovementsTable movements={closed.movements} />
             </div>
           )}
-          {!viewingOther && (
-          <div className="panel" style={{ marginBottom: "1rem" }}>
-            <h2 className="page-title" style={{ fontSize: "1.2rem" }}>
-              Abrir corte
-            </h2>
-            <p className="page-sub">
-              No tienes un corte abierto
-              {activeStoreId ? " en esta sucursal" : ""}. Cada cuenta abre el
-              suyo.
-            </p>
-            <form className="form-inline" onSubmit={onOpen}>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Efectivo inicial</label>
-                <MoneyInput
-                  value={openingCash}
-                  onChange={setOpeningCash}
-                  required
-                  aria-label="Efectivo inicial"
-                />
-              </div>
-              <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-                <label>Notas</label>
-                <input
-                  value={openNotes}
-                  onChange={(e) => setOpenNotes(e.target.value)}
-                />
-              </div>
-              <button className="btn" type="submit" disabled={busy || !activeStoreId}>
-                Abrir corte
-              </button>
-            </form>
-          </div>
-          )}
           {viewingOther && (
             <div className="panel" style={{ marginBottom: "1rem" }}>
               <p className="page-sub" style={{ margin: 0 }}>
-                {reviewUser?.fullName ?? "Ese empleado"} no tiene un corte abierto.
+                {reviewUser?.fullName ?? "Ese empleado"} no tiene corte abierto.
               </p>
             </div>
           )}
@@ -654,43 +652,42 @@ export function CashCutPage() {
 
       <div className="panel table-wrap">
         <h2 className="page-title" style={{ fontSize: "1.2rem" }}>
-          {isAdmin ? "Cortes por cuenta" : "Mis cortes"}
+          {isAdmin ? "Historial de cortes" : "Mis cortes anteriores"}
         </h2>
         <div className="form-inline" style={{ marginBottom: "0.85rem" }}>
           {isAdmin && (
             <>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Empleado</label>
-                <select value={fUser} onChange={(e) => setFUser(e.target.value)}>
-                  <option value="">Todas las cuentas</option>
-                  {users.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.fullName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Sucursal</label>
-                <select value={fStore} onChange={(e) => setFStore(e.target.value)}>
-                  <option value="">Todas</option>
-                  {stores.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {shortStore(item.name)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <SelectField
+                label="Empleado"
+                value={fUser}
+                onChange={setFUser}
+              >
+                <option value="">Todos</option>
+                {users.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.fullName}
+                  </option>
+                ))}
+              </SelectField>
+              <SelectField
+                label="Sucursal"
+                value={fStore}
+                onChange={setFStore}
+              >
+                <option value="">Todas</option>
+                {stores.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {shortStore(item.name)}
+                  </option>
+                ))}
+              </SelectField>
             </>
           )}
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Estatus</label>
-            <select value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
-              <option value="">Todos</option>
-              <option value="Abierto">Abierto</option>
-              <option value="Cerrado">Cerrado</option>
-            </select>
-          </div>
+          <SelectField label="Estatus" value={fStatus} onChange={setFStatus}>
+            <option value="">Todos</option>
+            <option value="Abierto">Abierto</option>
+            <option value="Cerrado">Cerrado</option>
+          </SelectField>
           <div className="form-row" style={{ marginBottom: 0 }}>
             <label>Desde</label>
             <DateInput value={fFrom} onChange={setFFrom} aria-label="Desde" />
@@ -704,11 +701,11 @@ export function CashCutPage() {
           <thead>
             <tr>
               <th>Apertura</th>
-              <th>Sucursal</th>
-              <th>Empleado</th>
+              {isAdmin && <th>Sucursal</th>}
+              {isAdmin && <th>Empleado</th>}
               <th>Estatus</th>
               <th>Ventas</th>
-              <th>Esperado</th>
+              <th>Debía haber</th>
               <th>Contado</th>
               <th>Diferencia</th>
               <th></th>
@@ -717,22 +714,30 @@ export function CashCutPage() {
           <tbody>
             {cuts.length === 0 ? (
               <tr>
-                <td colSpan={9}>Sin cortes con esos filtros.</td>
+                <td colSpan={isAdmin ? 9 : 7}>Sin cortes con esos filtros.</td>
               </tr>
             ) : (
               cuts.map((item) => (
                 <tr key={item.id}>
                   <td>{formatDateTime(item.openedAt)}</td>
-                  <td>{item.storeCode ?? "—"}</td>
-                  <td>{item.employeeName ?? "—"}</td>
+                  {isAdmin && <td>{item.storeCode ?? "—"}</td>}
+                  {isAdmin && <td>{item.employeeName ?? "—"}</td>}
                   <td>
-                    <span className={item.status === "Abierto" ? "badge warn" : "badge ok"}>
+                    <span
+                      className={
+                        item.status === "Abierto" ? "badge warn" : "badge ok"
+                      }
+                    >
                       {item.status}
                     </span>
                   </td>
                   <td>{money(item.salesTotal)}</td>
-                  <td>{item.expectedCash == null ? "—" : money(item.expectedCash)}</td>
-                  <td>{item.countedCash == null ? "—" : money(item.countedCash)}</td>
+                  <td>
+                    {item.expectedCash == null ? "—" : money(item.expectedCash)}
+                  </td>
+                  <td>
+                    {item.countedCash == null ? "—" : money(item.countedCash)}
+                  </td>
                   <td>{differenceBadge(item.difference)}</td>
                   <td>
                     <button
@@ -741,7 +746,7 @@ export function CashCutPage() {
                       style={{ padding: "0.3rem 0.55rem" }}
                       onClick={() => void openDetail(item.id)}
                     >
-                      Detalle
+                      Ver
                     </button>
                   </td>
                 </tr>
@@ -760,16 +765,16 @@ export function CashCutPage() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
-              Corte de {detail.cut.employeeName ?? "—"} ·{" "}
-              {detail.cut.storeCode ?? ""}
+              Corte · {detail.cut.employeeName ?? "—"}
+              {detail.cut.storeCode ? ` · ${detail.cut.storeCode}` : ""}
             </h2>
             <p className="page-sub">
-              {formatDateTime(detail.periodFrom)} → {formatDateTime(detail.periodTo)} ·{" "}
-              {detail.cut.status}
+              {formatDateTime(detail.periodFrom)} →{" "}
+              {formatDateTime(detail.periodTo)} · {detail.cut.status}
               {detail.cut.status === "Cerrado" && (
                 <>
                   {" "}
-                  · contado {money(detail.cut.countedCash)} · diferencia{" "}
+                  · contado {money(detail.cut.countedCash)} ·{" "}
                   {differenceBadge(detail.cut.difference)}
                 </>
               )}
@@ -780,14 +785,13 @@ export function CashCutPage() {
             <h3 className="detail-title">Movimientos</h3>
             <MovementsTable movements={detail.movements} />
 
-            <h3 className="detail-title">Ventas del corte</h3>
+            <h3 className="detail-title">Ventas</h3>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Folio</th>
                     <th>Hora</th>
-                    <th>Tipo</th>
                     <th>Pago</th>
                     <th>Total</th>
                   </tr>
@@ -795,15 +799,14 @@ export function CashCutPage() {
                 <tbody>
                   {detail.sales.length === 0 ? (
                     <tr>
-                      <td colSpan={5}>Sin ventas en este corte.</td>
+                      <td colSpan={4}>Sin ventas en este corte.</td>
                     </tr>
                   ) : (
                     detail.sales.map((sale) => (
                       <tr key={sale.id}>
                         <td>{sale.folio}</td>
                         <td>{formatDateTime(sale.createdAt)}</td>
-                        <td>{sale.saleType}</td>
-                        <td>{sale.paymentMethod ?? "Sin método"}</td>
+                        <td>{sale.paymentMethod ?? "—"}</td>
                         <td>{money(sale.total)}</td>
                       </tr>
                     ))
@@ -812,35 +815,39 @@ export function CashCutPage() {
               </table>
             </div>
 
-            <h3 className="detail-title">Auditoría</h3>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Usuario</th>
-                    <th>Acción</th>
-                    <th>Cambios</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {detail.audits.length === 0 ? (
-                    <tr>
-                      <td colSpan={4}>Sin registros de auditoría.</td>
-                    </tr>
-                  ) : (
-                    detail.audits.map((audit) => (
-                      <tr key={audit.id}>
-                        <td>{formatDateTime(audit.createdAt)}</td>
-                        <td>{audit.userName ?? "—"}</td>
-                        <td>{audit.action}</td>
-                        <td>{auditChanges(audit)}</td>
+            {isAdmin && (
+              <>
+                <h3 className="detail-title">Auditoría</h3>
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Usuario</th>
+                        <th>Acción</th>
+                        <th>Cambios</th>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {detail.audits.length === 0 ? (
+                        <tr>
+                          <td colSpan={4}>Sin registros.</td>
+                        </tr>
+                      ) : (
+                        detail.audits.map((audit) => (
+                          <tr key={audit.id}>
+                            <td>{formatDateTime(audit.createdAt)}</td>
+                            <td>{audit.userName ?? "—"}</td>
+                            <td>{audit.action}</td>
+                            <td>{auditChanges(audit)}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
 
             <button
               className="btn secondary"
@@ -853,6 +860,25 @@ export function CashCutPage() {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        open={closeConfirmOpen}
+        title="Cerrar corte"
+        message={
+          pendingCounted == null
+            ? "¿Cerrar el corte? Después solo un administrador puede corregirlo."
+            : `¿Cerrar el corte con ${money(pendingCounted)} contados? Después solo un administrador puede corregirlo.`
+        }
+        confirmLabel="Cerrar corte"
+        cancelLabel="Seguir en el corte"
+        busy={busy}
+        onConfirm={() => void confirmCloseCut()}
+        onCancel={() => {
+          if (busy) return;
+          setCloseConfirmOpen(false);
+          setPendingCounted(null);
+        }}
+      />
     </div>
   );
 }

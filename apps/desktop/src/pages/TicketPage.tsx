@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type {
   Customer,
@@ -12,6 +12,7 @@ import { CUSTOMER_CATEGORY_LABELS, PAYMENT_METHOD_LABELS } from "@lcds/shared";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { SelectField } from "../components/SelectField";
 import { money, qs, shortStore } from "../util";
 
 type Preview = {
@@ -41,7 +42,6 @@ type CommitResult = {
   destination: string;
   delivered: boolean;
   whatsappUrl?: string;
-  hqNotified?: boolean;
 };
 
 type RecentTicket = {
@@ -79,23 +79,21 @@ export function TicketPage() {
   const [category, setCategory] = useState<CustomerCategory>("Publico");
   const [saleType, setSaleType] = useState<SaleType>("Menudeo");
   const [payment, setPayment] = useState<PaymentMethod>("Efectivo");
-  const [barcode, setBarcode] = useState("");
   const [barcodes, setBarcodes] = useState<string[]>([]);
+  const [scanBuffer, setScanBuffer] = useState("");
   const [scanSealed, setScanSealed] = useState(false);
   const fromScanner = useRef(false);
   const barcodeRef = useRef("");
   const lastKeyAt = useRef(0);
   const sealTimer = useRef<number | null>(null);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [customer, setCustomer] = useState<Customer | null>(null);
-  const [customerText, setCustomerText] = useState("");
 
   const [channel, setChannel] = useState<"email" | "whatsapp" | null>(null);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [notifyHq, setNotifyHq] = useState(false);
-  const [hqRequested, setHqRequested] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [ticket, setTicket] = useState<CommitResult | null>(null);
   const [recent, setRecent] = useState<RecentTicket[]>([]);
@@ -110,6 +108,12 @@ export function TicketPage() {
   const [pickerRows, setPickerRows] = useState<CatalogRow[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerMsg, setPickerMsg] = useState<string | null>(null);
+
+  // Productos con stock de la sucursal (ID + nombre)
+  const [storeOptions, setStoreOptions] = useState<{ code: string; name: string }[]>(
+    [],
+  );
+  const [pickedId, setPickedId] = useState("");
 
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const phoneDigits = phone.replace(/\D/g, "");
@@ -157,6 +161,37 @@ export function TicketPage() {
     if (!openFolio) return;
     openTicketRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [openFolio]);
+
+  // Productos con stock (desplegable ID + nombre).
+  useEffect(() => {
+    if (!activeStoreId) {
+      setStoreOptions([]);
+      setPickedId("");
+      return;
+    }
+    let cancelled = false;
+    void api<CatalogRow[]>(`/catalog?${qs({ storeId: activeStoreId })}`)
+      .then((rows) => {
+        if (cancelled) return;
+        const seen = new Set<string>();
+        const options: { code: string; name: string }[] = [];
+        for (const row of rows) {
+          if (row.disponible <= 0) continue;
+          const code = productCode(row);
+          if (!code || seen.has(code)) continue;
+          seen.add(code);
+          options.push({ code, name: row.name });
+        }
+        options.sort((a, b) => a.code.localeCompare(b.code, "es"));
+        setStoreOptions(options);
+      })
+      .catch(() => {
+        if (!cancelled) setStoreOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeStoreId, ticket?.sale.folio]);
 
   // Búsqueda en el catálogo (modal).
   useEffect(() => {
@@ -212,7 +247,7 @@ export function TicketPage() {
     setScanSealed(false);
     if (clear) {
       barcodeRef.current = "";
-      setBarcode("");
+      setScanBuffer("");
     }
   }
 
@@ -236,7 +271,11 @@ export function TicketPage() {
     }
     if (fromScanner.current && event.key !== "Enter") {
       if (sealTimer.current != null) window.clearTimeout(sealTimer.current);
-      sealTimer.current = window.setTimeout(() => setScanSealed(true), 120);
+      sealTimer.current = window.setTimeout(() => {
+        setScanSealed(true);
+        const code = barcodeRef.current.trim();
+        if (code) void addFromScan(code);
+      }, 120);
     }
   }
 
@@ -249,30 +288,48 @@ export function TicketPage() {
       return;
     }
     barcodeRef.current = value;
-    setBarcode(value);
+    setScanBuffer(value);
   }
 
-  async function addBarcode(event: FormEvent) {
-    event.preventDefault();
-    const code = barcode.trim();
-    const scanned = fromScanner.current || scanSealed;
+  async function addCode(code: string) {
     if (!code || busy) return;
     setError(null);
     setTicket(null);
     const next = [...barcodes, code];
     setBusy("scan");
-    setScanSealed(true);
     try {
       await quote(next);
       setBarcodes(next);
-      releaseScan(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "No se pudo escanear");
-      if (scanned) releaseScan(true);
-      else setScanSealed(false);
+      setError(err instanceof ApiError ? err.message : "No se pudo agregar");
     } finally {
       setBusy(null);
     }
+  }
+
+  async function addFromScan(code: string) {
+    const scanned = fromScanner.current || scanSealed;
+    setScanSealed(true);
+    try {
+      await addCode(code);
+      setPickedId("");
+      releaseScan(true);
+      scanInputRef.current?.focus();
+    } catch {
+      if (scanned) releaseScan(true);
+      else setScanSealed(false);
+    }
+  }
+
+  async function addFromSelect(code: string) {
+    if (!code) {
+      setPickedId("");
+      return;
+    }
+    setPickedId(code);
+    await addCode(code);
+    setPickedId("");
+    scanInputRef.current?.focus();
   }
 
   /** Agrega un producto elegido en el buscador (mismo flujo que escanear). */
@@ -337,9 +394,21 @@ export function TicketPage() {
     return `${item.clientNumber ?? "S/N"} — ${item.name} (${CUSTOMER_CATEGORY_LABELS[item.category]})`;
   }
 
-  async function selectCustomer(text: string) {
-    setCustomerText(text);
-    const found = customers.find((item) => customerLabel(item) === text);
+  async function selectCustomer(customerId: string) {
+    if (!customerId) {
+      setCustomer(null);
+      setCategory("Publico");
+      if (barcodes.length > 0) {
+        setError(null);
+        try {
+          await quote(barcodes, { customerId: "", category: "Publico" });
+        } catch (err) {
+          setError(err instanceof ApiError ? err.message : "No se pudo actualizar precios");
+        }
+      }
+      return;
+    }
+    const found = customers.find((item) => item.id === customerId);
     if (!found) return;
     setError(null);
     if (barcodes.length > 0) {
@@ -347,7 +416,6 @@ export function TicketPage() {
         await quote(barcodes, { customerId: found.id, category: found.category });
       } catch (err) {
         setError(err instanceof ApiError ? err.message : "No se pudo actualizar precios");
-        setCustomerText(customer ? customerLabel(customer) : "");
         return;
       }
     }
@@ -355,23 +423,6 @@ export function TicketPage() {
     setCategory(found.category);
     if (found.email) setEmail(found.email);
     if (found.phone) setPhone(found.phone);
-  }
-
-  async function clearCustomer() {
-    setCustomerText("");
-    if (!customer) return;
-    setError(null);
-    if (barcodes.length > 0) {
-      try {
-        await quote(barcodes, { customerId: "", category: "Publico" });
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : "No se pudo actualizar precios");
-        setCustomerText(customerLabel(customer));
-        return;
-      }
-    }
-    setCustomer(null);
-    setCategory("Publico");
   }
 
   async function closeSale(deliveryChannel: Channel) {
@@ -393,17 +444,13 @@ export function TicketPage() {
           deliveryChannel,
           email: deliveryChannel === "email" ? email.trim() : undefined,
           phone: deliveryChannel === "whatsapp" ? phone.trim() : undefined,
-          notifyHq: notifyHq || undefined,
         }),
       });
       setTicket(result);
-      setHqRequested(notifyHq);
       setBarcodes([]);
       setPreview(null);
       setChannel(null);
-      setNotifyHq(false);
       setCustomer(null);
-      setCustomerText("");
       setCategory("Publico");
       setEmail("");
       setPhone("");
@@ -467,7 +514,6 @@ export function TicketPage() {
                   setBarcodes([]);
                   setPreview(null);
                   setCustomer(null);
-                  setCustomerText("");
                   setCategory("Publico");
                 }}
               >
@@ -476,32 +522,49 @@ export function TicketPage() {
             ))}
           </div>
         )}
-        <form className="form-inline" onSubmit={addBarcode}>
-          <div className="form-row" style={{ marginBottom: 0, flex: 1.4 }}>
-            <label>Escaneo</label>
-            <input
-              value={barcode}
-              autoFocus
-              readOnly={scanSealed || busy === "scan"}
-              placeholder="ID del producto, ej. P0004"
-              onKeyDown={onScanKeyDown}
-              onChange={(event) => onScanChange(event.target.value)}
-              onPaste={(event) => {
-                const text = event.clipboardData.getData("text").trim();
-                if (text.length < 3 || scanSealed || busy === "scan") return;
-                event.preventDefault();
-                fromScanner.current = true;
-                barcodeRef.current = text;
-                setBarcode(text);
-                setScanSealed(true);
-              }}
-            />
-          </div>
-          <button className="btn" type="submit" disabled={busy !== null || !barcode.trim()}>
-            {busy === "scan" ? "Buscando…" : "Agregar"}
-          </button>
+        <div className="ticket-fields">
+          {/* Campo oculto: el escáner escribe aquí y agrega solo. */}
+          <input
+            ref={scanInputRef}
+            className="scan-trap"
+            value={scanBuffer}
+            autoFocus
+            aria-label="Escáner de producto"
+            readOnly={scanSealed || busy === "scan"}
+            onKeyDown={onScanKeyDown}
+            onChange={(event) => onScanChange(event.target.value)}
+            onPaste={(event) => {
+              const text = event.clipboardData.getData("text").trim();
+              if (text.length < 3 || scanSealed || busy === "scan") return;
+              event.preventDefault();
+              fromScanner.current = true;
+              barcodeRef.current = text;
+              setScanBuffer(text);
+              void addFromScan(text);
+            }}
+          />
+          <SelectField
+            className="ticket-fields__product"
+            label="Producto"
+            value={pickedId}
+            disabled={!activeStoreId || busy !== null || storeOptions.length === 0}
+            onChange={(value) => void addFromSelect(value)}
+          >
+            <option value="">
+              {storeOptions.length === 0
+                ? "Sin productos con stock"
+                : busy === "scan"
+                  ? "Agregando…"
+                  : "Selecciona ID y producto…"}
+            </option>
+            {storeOptions.map((item) => (
+              <option key={item.code} value={item.code}>
+                {item.code} — {item.name}
+              </option>
+            ))}
+          </SelectField>
           <button
-            className="btn secondary"
+            className="btn secondary ticket-fields__search"
             type="button"
             disabled={!activeStoreId}
             onClick={() => {
@@ -511,10 +574,8 @@ export function TicketPage() {
           >
             Buscar producto
           </button>
-        </form>
 
-        <div className="form-inline" style={{ marginTop: "0.85rem" }}>
-          <div className="form-row" style={{ marginBottom: 0 }}>
+          <div className="form-row ticket-fields__type" style={{ marginBottom: 0 }}>
             <label>Tipo de venta</label>
             <div className="store-buttons" style={{ marginLeft: 0 }}>
               {(["Menudeo", "Mayoreo"] as SaleType[]).map((item) => (
@@ -529,7 +590,7 @@ export function TicketPage() {
               ))}
             </div>
           </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
+          <div className="form-row ticket-fields__category" style={{ marginBottom: 0 }}>
             <label>
               Categoría de precio
               {customer ? " (según el cliente)" : ""}
@@ -548,51 +609,34 @@ export function TicketPage() {
               ))}
             </div>
           </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Pago</label>
-            <select
-              value={payment}
-              onChange={(event) => setPayment(event.target.value as PaymentMethod)}
-            >
-              {PAYMENTS.map((key) => (
-                <option key={key} value={key}>
-                  {PAYMENT_METHOD_LABELS[key]}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="form-inline" style={{ marginTop: "0.85rem" }}>
-          <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
-            <label>Cliente (opcional)</label>
-            <input
-              list="ticket-customers"
-              value={customerText}
-              placeholder="Público general — escribe número o nombre para elegir un cliente"
-              onChange={(event) => void selectCustomer(event.target.value)}
-            />
-            <datalist id="ticket-customers">
-              {customers.map((item) => (
-                <option key={item.id} value={customerLabel(item)} />
-              ))}
-            </datalist>
-          </div>
-          <button
-            className="btn secondary"
-            type="button"
-            disabled={!customer && !customerText}
-            onClick={() => void clearCustomer()}
+          <SelectField
+            className="ticket-fields__pay"
+            label="Pago"
+            value={payment}
+            onChange={(value) => setPayment(value as PaymentMethod)}
           >
-            Quitar cliente
-          </button>
+            {PAYMENTS.map((key) => (
+              <option key={key} value={key}>
+                {PAYMENT_METHOD_LABELS[key]}
+              </option>
+            ))}
+          </SelectField>
+
+          <SelectField
+            className="ticket-fields__customer"
+            label="Cliente (opcional)"
+            value={customer?.id ?? ""}
+            disabled={!activeStoreId}
+            onChange={(value) => void selectCustomer(value)}
+          >
+            <option value="">Público general</option>
+            {customers.map((item) => (
+              <option key={item.id} value={item.id}>
+                {customerLabel(item)}
+              </option>
+            ))}
+          </SelectField>
         </div>
-        {customer && (
-          <p className="page-sub" style={{ margin: "0.6rem 0 0" }}>
-            Cliente: <strong>{customer.name}</strong> ·{" "}
-            {CUSTOMER_CATEGORY_LABELS[customer.category]}
-          </p>
-        )}
       </div>
 
       <div className="panel table-wrap" style={{ marginBottom: "1rem" }}>
@@ -631,7 +675,7 @@ export function TicketPage() {
             {!preview && (
               <tr>
                 <td colSpan={6}>
-                  Escanea o busca un producto disponible para armar el ticket.
+                  Elige o escanea un producto disponible para armar el ticket.
                 </td>
               </tr>
             )}
@@ -645,14 +689,6 @@ export function TicketPage() {
         )}
 
         <div style={{ marginTop: "0.85rem" }}>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={notifyHq}
-              onChange={(event) => setNotifyHq(event.target.checked)}
-            />
-            Avisar a La Casa del Shampoo (copia de esta venta a oficina)
-          </label>
           <div className="form-inline">
             <button
               className="btn"
@@ -754,13 +790,7 @@ export function TicketPage() {
           <h2 className="page-title" style={{ fontSize: "1.35rem" }}>
             Venta {ticket.sale.folio}
           </h2>
-          <p className="page-sub">
-            {resultMessage(ticket)}
-            {ticket.hqNotified === true && " Oficina avisada."}
-            {ticket.hqNotified !== true &&
-              hqRequested &&
-              " No se pudo avisar a oficina (la venta sí quedó cerrada)."}
-          </p>
+          <p className="page-sub">{resultMessage(ticket)}</p>
           {ticket.channel === "whatsapp" && ticket.whatsappUrl && (
             <p style={{ margin: "0 0 0.75rem" }}>
               <button

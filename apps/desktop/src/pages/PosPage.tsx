@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { PRODUCT_CATEGORIES, type Product, type Store } from "@lcds/shared";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth/AuthContext";
+import { ProductSelect } from "../components/ProductSelect";
+import { SelectField } from "../components/SelectField";
 import { formatDateTime } from "../util";
 
 type AdjustMode = "set" | "increase" | "decrease";
@@ -246,16 +248,45 @@ export function PosPage() {
       {error && <div className="error">{error}</div>}
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
-        <div className="catalog-toolbar">
-          <div className="catalog-search-row">
-            <input
-              className="catalog-search"
-              value={q}
-              autoFocus
-              placeholder="Busca producto por ID"
-              onChange={(event) => setQ(event.target.value)}
+        <div className="filter-bar">
+          <div className="filter-bar__left" style={{ flex: 1, minWidth: 0 }}>
+            <ProductSelect
+              className="product-select--toolbar"
+              value={
+                rows.find(
+                  (row) =>
+                    (row.code ?? "").toLowerCase() === q.trim().toLowerCase() ||
+                    row.id === q.trim(),
+                )?.id ?? ""
+              }
+              products={rows}
+              placeholder="Selecciona ID y producto…"
+              onChange={(productId) => {
+                const hit = rows.find((row) => row.id === productId);
+                if (!hit) {
+                  setQ("");
+                  return;
+                }
+                setQ(hit.code ?? hit.name);
+                if (isAdmin) openProduct(hit);
+              }}
             />
-            {isAdmin && (
+            <SelectField
+              className="product-select--toolbar"
+              label="Categoría"
+              value={category}
+              onChange={setCategory}
+            >
+              <option value="">Todas las categorías</option>
+              {PRODUCT_CATEGORIES.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </SelectField>
+          </div>
+          {isAdmin && (
+            <div className="store-buttons store-buttons--equal filter-bar__right">
               <button
                 type="button"
                 className={storeId === "" ? "btn" : "btn secondary"}
@@ -263,10 +294,6 @@ export function PosPage() {
               >
                 Todos
               </button>
-            )}
-          </div>
-          {isAdmin && (
-            <div className="store-buttons">
               {stores.map((item) => {
                 const active = item.id === storeId;
                 return (
@@ -282,18 +309,6 @@ export function PosPage() {
               })}
             </div>
           )}
-          <select
-            value={category}
-            aria-label="Categoría"
-            onChange={(event) => setCategory(event.target.value)}
-          >
-            <option value="">Todas las categorías</option>
-            {PRODUCT_CATEGORIES.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 
@@ -308,14 +323,14 @@ export function PosPage() {
               <th>Precio</th>
               <th>Disponibles</th>
               <th>Vendidos</th>
-              {isAdmin && <th></th>}
             </tr>
           </thead>
           <tbody>
             {visible.map((row) => (
               <tr
                 key={row.id}
-                className={row.tacha ? "row-tacha" : undefined}
+                className={`${row.tacha ? "row-tacha" : ""}${isAdmin ? " row-link" : ""}`.trim()}
+                onClick={isAdmin ? () => openProduct(row) : undefined}
               >
                 <td>{row.code ?? "—"}</td>
                 <td>{row.name}</td>
@@ -332,26 +347,14 @@ export function PosPage() {
                   )}
                 </td>
                 <td>{row.vendido}</td>
-                {isAdmin && (
-                  <td>
-                    <button
-                      type="button"
-                      className="btn secondary"
-                      style={{ padding: "0.3rem 0.55rem" }}
-                      onClick={() => openProduct(row)}
-                    >
-                      Editar stock
-                    </button>
-                  </td>
-                )}
               </tr>
             ))}
           </tbody>
         </table>
-        {isAdmin && !storeId && (
+        {isAdmin && (
           <p className="page-sub" style={{ margin: "0.75rem 0 0" }}>
-            Vista de todas las sucursales: el total disponible es la suma. Para
-            modificar stock usa <strong>Editar stock</strong> y elige la sucursal.
+            Haz clic en un producto para ajustar el stock
+            {!storeId ? " (elige la sucursal dentro del editor)" : ""}.
           </p>
         )}
       </div>
@@ -359,7 +362,7 @@ export function PosPage() {
       {isAdmin && selected && (
         <div className="modal-back" onClick={() => setSelected(null)}>
           <div
-            className="modal scroll"
+            className="modal wide scroll stock-editor-modal"
             role="dialog"
             aria-modal="true"
             onClick={(event) => event.stopPropagation()}
@@ -371,125 +374,138 @@ export function PosPage() {
               {selected.brand ?? "Sin marca"} · {selected.category ?? "Sin categoría"}
             </p>
 
-            <div className="stock-adjust">
-              <h3 className="detail-title" style={{ marginTop: 0 }}>
-                Stock por sucursal
-              </h3>
-              <p className="page-sub">
-                El cambio aplica solo a la sucursal elegida. El total global se
-                actualiza con la suma de las tres.
-              </p>
-              <div className="table-wrap" style={{ marginBottom: "0.85rem" }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Sucursal</th>
-                      <th>Disponibles</th>
-                      <th>Vendidos</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockByStore.map((item) => {
-                      const active = item.storeId === editStoreId;
-                      return (
-                        <tr key={item.storeId} className={active ? "row-link selected" : undefined}>
-                          <td>
-                            {item.storeCode} —{" "}
-                            {item.storeName.replace("La Casa del Shampoo — ", "")}
-                          </td>
-                          <td>
-                            <span
+            <div className="stock-adjust stock-adjust--wide">
+              <div className="stock-editor-grid">
+                <div>
+                  <h3 className="detail-title" style={{ marginTop: 0 }}>
+                    Stock por sucursal
+                  </h3>
+                  <p className="page-sub">
+                    Elige la sucursal y ajusta solo ahí. El total es la suma de
+                    las tres.
+                  </p>
+                  <div className="table-wrap" style={{ marginBottom: "0.85rem" }}>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Sucursal</th>
+                          <th>Disponibles</th>
+                          <th>Vendidos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {stockByStore.map((item) => {
+                          const active = item.storeId === editStoreId;
+                          return (
+                            <tr
+                              key={item.storeId}
                               className={
-                                item.disponible > 0 ? "stock-ok" : "stock-out"
+                                active ? "row-link selected" : "row-link"
                               }
-                            >
-                              {item.disponible}
-                            </span>
-                          </td>
-                          <td>{item.vendido}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className={active ? "btn" : "btn secondary"}
-                              style={{ padding: "0.3rem 0.55rem" }}
                               onClick={() => {
                                 setEditStoreId(item.storeId);
                                 setAdjError(null);
                                 setAdjMessage(null);
                               }}
                             >
-                              {active ? "Editando…" : "Editar aquí"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                              <td>
+                                {item.storeCode} —{" "}
+                                {item.storeName.replace(
+                                  "La Casa del Shampoo — ",
+                                  "",
+                                )}
+                              </td>
+                              <td>
+                                <span
+                                  className={
+                                    item.disponible > 0 ? "stock-ok" : "stock-out"
+                                  }
+                                >
+                                  {item.disponible}
+                                </span>
+                              </td>
+                              <td>{item.vendido}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div>
+                  <h3 className="detail-title" style={{ marginTop: 0 }}>
+                    Ajustar existencia
+                  </h3>
+                  {!editStoreId ? (
+                    <p className="notice">
+                      Haz clic en una sucursal de la tabla para editarla.
+                    </p>
+                  ) : (
+                    <form onSubmit={(event) => void onAdjust(event)}>
+                      {adjError && <div className="error">{adjError}</div>}
+                      {adjMessage && <div className="success">{adjMessage}</div>}
+                      <p className="page-sub">
+                        Sucursal:{" "}
+                        <strong>
+                          {editStore?.name.replace("La Casa del Shampoo — ", "")}
+                        </strong>{" "}
+                        · Disponible ahora:{" "}
+                        <strong>{editStock?.disponible ?? 0}</strong>
+                      </p>
+                      <div className="form-row">
+                        <label>Tipo de ajuste</label>
+                        <select
+                          value={adjMode}
+                          onChange={(e) =>
+                            setAdjMode(e.target.value as AdjustMode)
+                          }
+                        >
+                          {(Object.keys(ADJUST_MODE_LABEL) as AdjustMode[]).map(
+                            (key) => (
+                              <option key={key} value={key}>
+                                {ADJUST_MODE_LABEL[key]}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      </div>
+                      <div className="form-row">
+                        <label>Cantidad</label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={adjQty}
+                          onChange={(e) => setAdjQty(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="form-row">
+                        <label>Motivo</label>
+                        <input
+                          value={adjReason}
+                          maxLength={300}
+                          placeholder="Ej. conteo físico, merma, entrada de proveedor"
+                          onChange={(e) => setAdjReason(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <button
+                        className="btn accent"
+                        type="submit"
+                        style={{ width: "100%" }}
+                        disabled={busy}
+                      >
+                        {busy
+                          ? "Aplicando…"
+                          : `Aplicar en ${editStore?.code ?? "sucursal"}`}
+                      </button>
+                    </form>
+                  )}
+                </div>
               </div>
 
-              <h3 className="detail-title">Ajustar existencia</h3>
-              {!editStoreId ? (
-                <p className="notice">
-                  Elige una sucursal con el botón <strong>Editar aquí</strong>.
-                </p>
-              ) : (
-                <form onSubmit={(event) => void onAdjust(event)}>
-                  {adjError && <div className="error">{adjError}</div>}
-                  {adjMessage && <div className="success">{adjMessage}</div>}
-                  <p className="page-sub">
-                    Sucursal:{" "}
-                    <strong>
-                      {editStore?.name.replace("La Casa del Shampoo — ", "")}
-                    </strong>{" "}
-                    · Disponible ahora:{" "}
-                    <strong>{editStock?.disponible ?? 0}</strong>
-                  </p>
-                  <div className="form-row">
-                    <label>Tipo de ajuste</label>
-                    <select
-                      value={adjMode}
-                      onChange={(e) => setAdjMode(e.target.value as AdjustMode)}
-                    >
-                      {(Object.keys(ADJUST_MODE_LABEL) as AdjustMode[]).map((key) => (
-                        <option key={key} value={key}>
-                          {ADJUST_MODE_LABEL[key]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-row">
-                    <label>Cantidad</label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={adjQty}
-                      onChange={(e) => setAdjQty(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="form-row">
-                    <label>Motivo</label>
-                    <input
-                      value={adjReason}
-                      maxLength={300}
-                      placeholder="Ej. conteo físico, merma, entrada de proveedor"
-                      onChange={(e) => setAdjReason(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <button
-                    className="btn accent"
-                    type="submit"
-                    style={{ width: "100%" }}
-                    disabled={busy}
-                  >
-                    {busy ? "Aplicando…" : `Aplicar en ${editStore?.code ?? "sucursal"}`}
-                  </button>
-                </form>
-              )}
               <h3 className="detail-title">Últimos ajustes</h3>
               {adjustments.length === 0 ? (
                 <p className="page-sub">Sin ajustes registrados.</p>
@@ -525,31 +541,31 @@ export function PosPage() {
               )}
             </div>
 
-            <button
-              className="btn"
-              type="button"
-              style={{ width: "100%", marginBottom: "0.5rem" }}
-              onClick={() => navigate(`/precios?producto=${selected.id}`)}
-            >
-              Modificar este precio
-            </button>
-            <button
-              className="btn danger"
-              type="button"
-              style={{ width: "100%" }}
-              disabled={busy}
-              onClick={() => void removeFromCatalog()}
-            >
-              {busy ? "Quitando…" : "Quitar del catálogo"}
-            </button>
-            <button
-              className="btn secondary"
-              type="button"
-              style={{ width: "100%", marginTop: "0.5rem" }}
-              onClick={() => setSelected(null)}
-            >
-              Cerrar
-            </button>
+            <div className="filter-bar" style={{ marginTop: "1rem" }}>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => navigate(`/precios?producto=${selected.id}`)}
+              >
+                Ir a precios
+              </button>
+              <button
+                className="btn danger"
+                type="button"
+                disabled={busy}
+                onClick={() => void removeFromCatalog()}
+              >
+                {busy ? "Quitando…" : "Quitar del catálogo"}
+              </button>
+              <button
+                className="btn secondary"
+                type="button"
+                style={{ marginLeft: "auto" }}
+                onClick={() => setSelected(null)}
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

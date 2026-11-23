@@ -9,6 +9,7 @@ import type {
 } from "@lcds/shared";
 import { CUSTOMER_CATEGORY_LABELS } from "@lcds/shared";
 import { api, ApiError } from "../api";
+import { ProductSelect } from "../components/ProductSelect";
 import { DateInput, isoToMx } from "../DateInput";
 import { MoneyInput, parseMoneyInput } from "../MoneyInput";
 import { defaultDateTo, money } from "../util";
@@ -243,50 +244,42 @@ export function PricesPage() {
       {saved && <div className="success">{saved}</div>}
 
       <div className="panel" style={{ marginBottom: "1rem" }}>
-        <div className="store-buttons" style={{ marginLeft: 0, marginBottom: "0.75rem" }}>
-          {(
-            [
-              ["producto", "Por producto"],
-              ["general", "General"],
-              ["marca", "Por marca"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={view === key ? "btn" : "btn secondary"}
-              onClick={() => {
-                setView(key);
-                setSaved(null);
-                setError(null);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        {view === "producto" && (
-          <div className="form-row" style={{ marginBottom: 0, maxWidth: 420 }}>
-            <label>Producto</label>
-            <select
+        <div className="filter-bar" style={{ marginBottom: view === "producto" ? 0 : "0.75rem" }}>
+          <div className="store-buttons store-buttons--equal" style={{ marginLeft: 0 }}>
+            {(
+              [
+                ["producto", "Por producto"],
+                ["general", "General"],
+                ["marca", "Por marca"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={view === key ? "btn" : "btn secondary"}
+                onClick={() => {
+                  setView(key);
+                  setSaved(null);
+                  setError(null);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {view === "producto" && (
+            <ProductSelect
+              className="product-select--toolbar"
               value={productId}
-              onChange={(e) => {
+              products={products}
+              onChange={(id) => {
                 setSaved(null);
-                setProductId(e.target.value);
+                setProductId(id);
                 setCostEdit(false);
               }}
-            >
-              {[...products]
-                .sort((a, b) => (a.code ?? "").localeCompare(b.code ?? ""))
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.code ?? p.sku} — {p.name}
-                  </option>
-                ))}
-            </select>
-          </div>
-        )}
+            />
+          )}
+        </div>
 
         {view !== "producto" && (
           <div className="catalog-toolbar" style={{ flexWrap: "wrap" }}>
@@ -342,8 +335,8 @@ export function PricesPage() {
               Costo del producto
             </h2>
             {!costEdit ? (
-              <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
-                <p className="page-sub" style={{ margin: 0 }}>
+              <div className="filter-bar" style={{ alignItems: "center" }}>
+                <p className="page-sub" style={{ margin: 0, flex: 1 }}>
                   Costo actual:{" "}
                   <strong>
                     {selected.cost == null ? "no capturado" : money(selected.cost)}

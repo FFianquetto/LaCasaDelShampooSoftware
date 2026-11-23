@@ -258,15 +258,160 @@ export function SalesHistoryPage() {
       </p>
       {error && <div className="error">{error}</div>}
 
+      <div className="panel" style={{ marginBottom: "1rem" }}>
+        <div className="fields-grid-5">
+          {isAdmin && (
+            <>
+              <div className="form-row">
+                <label>Empleado</label>
+                <select
+                  value={fUser}
+                  onChange={(e) => filterChange(setFUser)(e.target.value)}
+                >
+                  <option value="">Todos</option>
+                  {users.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row">
+                <label>Sucursal</label>
+                <select
+                  value={fStore}
+                  onChange={(e) => filterChange(setFStore)(e.target.value)}
+                >
+                  <option value="">Todas</option>
+                  {stores.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {shortStore(item.name)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row">
+                <label>Cliente</label>
+                <select
+                  value={fCustomer}
+                  onChange={(e) => filterChange(setFCustomer)(e.target.value)}
+                >
+                  <option value="">Todos</option>
+                  {customers.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row">
+                <label>Categoría de cliente</label>
+                <select
+                  value={fCategory}
+                  onChange={(e) =>
+                    filterChange(setFCategory)(e.target.value as "" | CustomerCategory)
+                  }
+                >
+                  <option value="">Todas</option>
+                  {(Object.keys(CUSTOMER_CATEGORY_LABELS) as CustomerCategory[]).map(
+                    (key) => (
+                      <option key={key} value={key}>
+                        {CUSTOMER_CATEGORY_LABELS[key]}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+              <div className="form-row">
+                <label>Producto</label>
+                <input
+                  list="history-products"
+                  value={productText}
+                  placeholder="Código o nombre…"
+                  onChange={(e) => onProductText(e.target.value)}
+                />
+                <datalist id="history-products">
+                  {productHits.map((item) => (
+                    <option key={item.id} value={productLabel(item)} />
+                  ))}
+                </datalist>
+              </div>
+            </>
+          )}
+          <div className="form-row">
+            <label>Pago</label>
+            <select
+              value={fPayment}
+              onChange={(e) =>
+                filterChange(setFPayment)(e.target.value as "" | PaymentMethod)
+              }
+            >
+              <option value="">Todos</option>
+              {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((key) => (
+                <option key={key} value={key}>
+                  {PAYMENT_METHOD_LABELS[key]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-row">
+            <label>Tipo</label>
+            <select
+              value={fSaleType}
+              onChange={(e) =>
+                filterChange(setFSaleType)(e.target.value as "" | SaleType)
+              }
+            >
+              <option value="">Todos</option>
+              <option value="Menudeo">Menudeo</option>
+              <option value="Mayoreo">Mayoreo</option>
+            </select>
+          </div>
+          <div className="form-row">
+            <label>Desde</label>
+            <DateInput
+              value={fFrom}
+              onChange={(value) => filterChange(setFFrom)(value)}
+              aria-label="Desde"
+            />
+          </div>
+          <div className="form-row">
+            <label>Hasta</label>
+            <DateInput
+              value={fTo}
+              onChange={(value) => filterChange(setFTo)(value)}
+              aria-label="Hasta"
+            />
+          </div>
+          <button className="btn secondary" type="button" onClick={setTodayRange}>
+            Hoy
+          </button>
+        </div>
+        {!daySummary?.employee && pageTotals.tickets > 0 && (
+          <p className="page-sub" style={{ margin: "0.65rem 0 0" }}>
+            En esta página: {pageTotals.tickets} tickets · {pageTotals.pieces} piezas ·{" "}
+            {money(pageTotals.revenue)}
+          </p>
+        )}
+      </div>
+
       {daySummary?.employee && (
-        <div className="panel" style={{ marginBottom: "1rem" }}>
-          <h2 className="page-title" style={{ fontSize: "1.2rem" }}>
+        <div className="panel history-summary" style={{ marginBottom: "1rem" }}>
+          <h2 className="page-title" style={{ fontSize: "1.35rem", marginBottom: "0.85rem" }}>
             Resumen del periodo
             {daySummary.employee.employeeName
               ? ` · ${daySummary.employee.employeeName}`
               : ""}
           </h2>
-          <div className="stats" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+          <div
+            className="stats"
+            style={{
+              gridTemplateColumns:
+                isAdmin && daySummary.employee.profit != null
+                  ? "repeat(4, 1fr)"
+                  : "repeat(3, 1fr)",
+            }}
+          >
             <div className="stat">
               Tickets
               <strong>{daySummary.employee.tickets}</strong>
@@ -286,44 +431,45 @@ export function SalesHistoryPage() {
               </div>
             )}
           </div>
-          <div className="form-inline" style={{ marginTop: "0.75rem", gap: "1rem" }}>
+          <div className="summary-breakdown">
             {daySummary.employee.byPaymentMethod.length > 0 && (
-              <div style={{ flex: 1, minWidth: "12rem" }}>
-                <p className="page-sub" style={{ margin: "0 0 0.35rem" }}>
-                  Por pago
-                </p>
+              <div>
+                <h3>Por pago</h3>
                 {daySummary.employee.byPaymentMethod.map((row) => (
                   <div key={row.key} className="cell-note">
                     {PAYMENT_METHOD_LABELS[row.key as PaymentMethod] ?? row.key}:{" "}
                     {money(row.revenue)}
-                    {isAdmin && row.profit != null ? ` · util. ${money(row.profit)}` : ""}
+                    {isAdmin && row.profit != null
+                      ? ` · util. ${money(row.profit)}`
+                      : ""}
                   </div>
                 ))}
               </div>
             )}
             {daySummary.employee.byCustomerCategory.length > 0 && (
-              <div style={{ flex: 1, minWidth: "12rem" }}>
-                <p className="page-sub" style={{ margin: "0 0 0.35rem" }}>
-                  Por tipo de cliente
-                </p>
+              <div>
+                <h3>Por tipo de cliente</h3>
                 {daySummary.employee.byCustomerCategory.map((row) => (
                   <div key={row.key} className="cell-note">
-                    {CUSTOMER_CATEGORY_LABELS[row.key as CustomerCategory] ?? row.key}:{" "}
-                    {money(row.revenue)}
-                    {isAdmin && row.profit != null ? ` · util. ${money(row.profit)}` : ""}
+                    {CUSTOMER_CATEGORY_LABELS[row.key as CustomerCategory] ??
+                      row.key}
+                    : {money(row.revenue)}
+                    {isAdmin && row.profit != null
+                      ? ` · util. ${money(row.profit)}`
+                      : ""}
                   </div>
                 ))}
               </div>
             )}
             {daySummary.employee.byProductCategory.length > 0 && (
-              <div style={{ flex: 1, minWidth: "12rem" }}>
-                <p className="page-sub" style={{ margin: "0 0 0.35rem" }}>
-                  Por categoría de producto
-                </p>
+              <div>
+                <h3>Por categoría de producto</h3>
                 {daySummary.employee.byProductCategory.map((row) => (
                   <div key={row.key} className="cell-note">
                     {row.key}: {money(row.revenue)}
-                    {isAdmin && row.profit != null ? ` · util. ${money(row.profit)}` : ""}
+                    {isAdmin && row.profit != null
+                      ? ` · util. ${money(row.profit)}`
+                      : ""}
                   </div>
                 ))}
               </div>
@@ -331,143 +477,6 @@ export function SalesHistoryPage() {
           </div>
         </div>
       )}
-
-      <div className="panel" style={{ marginBottom: "1rem" }}>
-        <div className="form-inline">
-          {isAdmin && (
-            <>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Empleado</label>
-                <select
-                  value={fUser}
-                  onChange={(e) => filterChange(setFUser)(e.target.value)}
-                >
-                  <option value="">Todos</option>
-                  {users.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.fullName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Sucursal</label>
-                <select
-                  value={fStore}
-                  onChange={(e) => filterChange(setFStore)(e.target.value)}
-                >
-                  <option value="">Todas</option>
-                  {stores.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {shortStore(item.name)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Cliente</label>
-                <select
-                  value={fCustomer}
-                  onChange={(e) => filterChange(setFCustomer)(e.target.value)}
-                >
-                  <option value="">Todos</option>
-                  {customers.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Categoría de cliente</label>
-                <select
-                  value={fCategory}
-                  onChange={(e) =>
-                    filterChange(setFCategory)(e.target.value as "" | CustomerCategory)
-                  }
-                >
-                  <option value="">Todas</option>
-                  {(Object.keys(CUSTOMER_CATEGORY_LABELS) as CustomerCategory[]).map(
-                    (key) => (
-                      <option key={key} value={key}>
-                        {CUSTOMER_CATEGORY_LABELS[key]}
-                      </option>
-                    ),
-                  )}
-                </select>
-              </div>
-              <div className="form-row" style={{ marginBottom: 0 }}>
-                <label>Producto (código o nombre)</label>
-                <input
-                  list="history-products"
-                  value={productText}
-                  placeholder="Escribe 2 letras…"
-                  onChange={(e) => onProductText(e.target.value)}
-                />
-                <datalist id="history-products">
-                  {productHits.map((item) => (
-                    <option key={item.id} value={productLabel(item)} />
-                  ))}
-                </datalist>
-              </div>
-            </>
-          )}
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Pago</label>
-            <select
-              value={fPayment}
-              onChange={(e) =>
-                filterChange(setFPayment)(e.target.value as "" | PaymentMethod)
-              }
-            >
-              <option value="">Todos</option>
-              {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((key) => (
-                <option key={key} value={key}>
-                  {PAYMENT_METHOD_LABELS[key]}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Tipo</label>
-            <select
-              value={fSaleType}
-              onChange={(e) =>
-                filterChange(setFSaleType)(e.target.value as "" | SaleType)
-              }
-            >
-              <option value="">Todos</option>
-              <option value="Menudeo">Menudeo</option>
-              <option value="Mayoreo">Mayoreo</option>
-            </select>
-          </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Desde</label>
-            <DateInput
-              value={fFrom}
-              onChange={(value) => filterChange(setFFrom)(value)}
-              aria-label="Desde"
-            />
-          </div>
-          <div className="form-row" style={{ marginBottom: 0 }}>
-            <label>Hasta</label>
-            <DateInput
-              value={fTo}
-              onChange={(value) => filterChange(setFTo)(value)}
-              aria-label="Hasta"
-            />
-          </div>
-          <button className="btn secondary" type="button" onClick={setTodayRange}>
-            Hoy
-          </button>
-        </div>
-        {!daySummary?.employee && pageTotals.tickets > 0 && (
-          <p className="page-sub" style={{ margin: "0.65rem 0 0" }}>
-            En esta página: {pageTotals.tickets} tickets · {pageTotals.pieces} piezas ·{" "}
-            {money(pageTotals.revenue)}
-          </p>
-        )}
-      </div>
 
       <div className="panel table-wrap">
         <table>
